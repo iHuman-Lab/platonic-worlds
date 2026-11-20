@@ -1,0 +1,18 @@
+# ---------------------------------------------------------------- Paths
+log_dir: 'tb_logs'
+
+# ----------------------------------------------------------------- Data
+games: ['freeway']
+num_actions: 18
+batch_size: 32
+size_x: 84
+size_y: 84
+grey_scale: True
+
+# ------------------------------------------------------------- Training
+epochs: 20
+
+# ------------------------------------------------- Conv JEPA
+conv_jepa_dim: 512 # latent size of the CNN encoder
+conv_jepa_frames: 2 # frames fed to the encoder
+conv_jepa_horizon: 2 # future steps predicted (= number of actions conditioned on)

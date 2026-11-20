@@ -118,3 +118,10 @@ data/interim/*
 
 
 
+
+# Videos (gym eval recordings)
+video/
+videos/
+*.mp4
+*.avi
+*.gif
