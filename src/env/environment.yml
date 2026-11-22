@@ -1,0 +1,11 @@
+name: gym
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - pip
+  - swig
+  - numpy>=1.26,<3
+  - pillow
+  - pip:
+      - "gymnasium[box2d]==1.3.0"
