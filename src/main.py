@@ -3,13 +3,13 @@ import os
 from pathlib import Path
 from types import SimpleNamespace
 
-import pytorch_lightning as pl
+import lightning as L
 import torch
 import yaml
-from dataset.pre_process import ComposePreprocessor, Resize, StackWithLabels
-from dataset.torch_dataset import get_torch_dataloaders
 from lightning.pytorch.loggers import TensorBoardLogger
 
+from dataset.pre_process import ComposePreprocessor, Resize, StackWithLabels
+from dataset.torch_dataset import get_torch_dataloaders
 from env.collect import collect_episode
 from env.episode_data import build_dataset_info
 from env.preview_episode import load_episode, play_episode
@@ -44,7 +44,7 @@ with skip_run("skip", "conv_jepa_pretraining") as check, check():
         horizon=horizon,
         num_actions=int(config["num_actions"]),
     )
-    trainer = pl.Trainer(
+    trainer = L.Trainer(
         logger=TensorBoardLogger(LOG_DIR, name=f"{games_name}/conv_jepa"),
         accelerator="gpu" if torch.cuda.is_available() else "cpu",
         devices=1,
@@ -54,7 +54,7 @@ with skip_run("skip", "conv_jepa_pretraining") as check, check():
     trainer.fit(model, data_loaders["train"])
 
 
-with skip_run("skip", "collect_env_data") as check, check():
+with skip_run("run", "collect_env_data") as check, check():
     # Options live in the `collect` block of configs/config.yaml
     args = SimpleNamespace(**config["collect"])
     args.collection_mode = "images" if args.save_png else args.collection_mode

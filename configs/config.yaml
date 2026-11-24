@@ -25,7 +25,7 @@ collect:
   output: 'dataset' # new directory per run; existing datasets are not overwritten
   collection_mode: 'images' # watch | data | images
   image_resolution: 'low' # low | middle | high
-  render: False # show the live simulator
+  render: true # show the live simulator
   save_png: False # also export individual PNG frames
   domain_randomize: False # randomize road/background colors
   exploration: 0.08 # steering noise strength, 0 to 1
