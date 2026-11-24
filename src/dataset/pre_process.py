@@ -1,146 +1,101 @@
-from collections import deque
+"""Turn streamed CarRacing tar samples into preprocessed training windows.
+
+Each episode is its own tar, so windows never cross episodes. Within a window of
+T frames, actions[i] is the action taken between frame i and frame i + 1, so
+there are T - 1 actions.
+"""
+
+from __future__ import annotations
+
+from typing import Iterator
 
 import numpy as np
 import torch
-from PIL import Image
-from torchvision import transforms
+import torch.nn.functional as F
+
+RGB_TO_GREY = (0.299, 0.587, 0.114)
 
 
-def _normalize_min_max(x):
-    return (x - torch.min(x)) / (torch.max(x) - torch.min(x))
+class Grayscale:
+    """Convert (T, 3, H, W) RGB to (T, 1, H, W) luminance."""
+
+    def __call__(self, images: torch.Tensor) -> torch.Tensor:
+        weights = torch.tensor(RGB_TO_GREY, dtype=images.dtype).view(1, 3, 1, 1)
+        return (images * weights).sum(dim=1, keepdim=True)
 
 
 class Resize:
-    def __init__(self, config):
-        if config.get("grey_scale", True):
-            self.transform = transforms.Compose(
-                [
-                    transforms.Resize((config["size_x"], config["size_y"])),
-                    transforms.Grayscale(num_output_channels=1),
-                    transforms.ToTensor(),
-                    transforms.Lambda(_normalize_min_max),
-                ]
-            )
-        else:
-            self.transform = transforms.Compose(
-                [
-                    transforms.Resize((config["size_x"], config["size_y"])),
-                    transforms.ToTensor(),
-                    transforms.Lambda(_normalize_min_max),
-                ]
-            )
+    """Resize (T, C, H, W) to (T, C, size, size); unchanged if already that size."""
 
-    def reset(self):
-        pass
+    def __init__(self, size: int) -> None:
+        self.size = size
 
-    def __call__(self, sample):
-        img, eye_gazes, action = sample
-
-        # ✅ Handle different input types safely
-        if isinstance(img, np.ndarray):
-            img = Image.fromarray(img)  # numpy → PIL
-
-        if (
-            isinstance(img, torch.Tensor)
-            and img.ndim == 3
-            and img.shape[0] not in [1, 3]
-        ):
-            # likely (H, W, C) → convert
-            img = img.permute(2, 0, 1)
-
-        # PIL images pass through untouched
-
-        img = self.transform(img)
-
-        return img, eye_gazes, action
-
-
-class Stack:
-    def __init__(self, config):
-        self.stack_len = config["stack_length"]
-        self.stack = deque(maxlen=self.stack_len)
-        self.config = config
-
-    def reset(self):
-        self.stack.clear()
-
-    def __call__(self, sample):
-        img, action = sample
-        if len(self.stack) < self.stack_len:
-            while len(self.stack) < self.stack_len:
-                self.stack.append(img)
-        else:
-            self.stack.append(img)
-        stacked = torch.cat(list(self.stack), dim=0)
-
-        return stacked
-
-
-class StackWithLabels:
-    """
-    Stacks images, gaze, and actions in temporal order.
-
-    Output ordering:
-        [t-3, t-2, t-1, t]
-
-    Therefore:
-        stacked_action[-1] == action for newest frame t
-    """
-
-    def __init__(self, config):
-        self.stack_len = config["stack_length"]
-        self.config = config
-
-        self.img_stack = deque(maxlen=self.stack_len)
-        self.gaze_stack = deque(maxlen=self.stack_len)
-        self.action_stack = deque(maxlen=self.stack_len)
-
-    def reset(self):
-        self.img_stack.clear()
-        self.gaze_stack.clear()
-        self.action_stack.clear()
-
-    def __call__(self, sample):
-        img, eye_gaze, action = sample
-        if len(self.img_stack) < self.stack_len:
-            while len(self.img_stack) < self.stack_len:
-                self.img_stack.append(img)
-                self.gaze_stack.append(eye_gaze)
-                self.action_stack.append(action)
-
-        else:
-            # IMPORTANT:
-            # Everything gets appended in the SAME direction.
-            #
-            # deque(maxlen=N) automatically removes the
-            # oldest item from the left.
-            self.img_stack.append(img)
-            self.gaze_stack.append(eye_gaze)
-            self.action_stack.append(action)
-        stacked_img = torch.cat(
-            list(self.img_stack),
-            dim=0,
-        )
-        stacked_action = torch.tensor(
-            list(self.action_stack),
-            dtype=torch.long,
-        )
-        return (
-            stacked_img,
-            stacked_action,
+    def __call__(self, images: torch.Tensor) -> torch.Tensor:
+        if tuple(images.shape[-2:]) == (self.size, self.size):
+            return images
+        return F.interpolate(
+            images,
+            size=(self.size, self.size),
+            mode="bilinear",
+            antialias=True,
+            align_corners=False,
         )
 
 
 class ComposePreprocessor:
-    def __init__(self, preprocessors):
-        self.preprocessors = preprocessors
+    """Apply image steps in order to a window of frames."""
 
-    def reset(self):
-        for p in self.preprocessors:
-            p.reset()
+    def __init__(self, steps: list) -> None:
+        self.steps = steps
 
-    def __call__(self, sample):
-        for p in self.preprocessors:
-            sample = p(sample)
+    def __call__(self, images: torch.Tensor) -> torch.Tensor:
+        for step in self.steps:
+            images = step(images)
+        return images
 
-        return sample
+
+STEP_BUILDERS = {
+    "grayscale": lambda cfg: Grayscale(),
+    "resize": lambda cfg: Resize(cfg["image_size"]),
+}
+
+
+def build_preprocessor(config: dict) -> ComposePreprocessor:
+    """Build the image pipeline from the ordered config['dataset']['preprocess'] list."""
+    cfg = config["dataset"]
+    return ComposePreprocessor([STEP_BUILDERS[name](cfg) for name in cfg["preprocess"]])
+
+
+def sliding_windows(
+    samples: Iterator[dict], window: int, stride: int, skip_intro: int
+) -> Iterator[list[dict]]:
+    """Yield lists of `window` consecutive samples, restarting at each new tar."""
+    current_tar = None
+    frames: list[dict] = []
+    for sample in samples:
+        if sample["__url__"] != current_tar:
+            current_tar = sample["__url__"]
+            frames = []
+        step = int(sample["__key__"])
+        if step < skip_intro:
+            continue
+        frames = (frames + [sample])[-window:]
+        first_step = step - window + 1
+        if len(frames) == window and (first_step - skip_intro) % stride == 0:
+            yield frames
+
+
+def window_to_tensors(
+    frames: list[dict], preprocessor: ComposePreprocessor
+) -> dict[str, torch.Tensor]:
+    """Stack one window into float tensors, preprocessing the images."""
+    images = np.stack([frame["png"] for frame in frames])
+    images = torch.from_numpy(images).permute(0, 3, 1, 2).float() / 255.0
+    return {
+        "images": preprocessor(images),
+        "states": torch.from_numpy(np.stack([f["state.npy"] for f in frames])).float(),
+        "extras": torch.from_numpy(np.stack([f["extras.npy"] for f in frames])).float(),
+        "actions": torch.from_numpy(
+            np.stack([f["action.npy"] for f in frames[:-1]])
+        ).float(),
+    }

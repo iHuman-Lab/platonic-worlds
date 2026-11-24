@@ -15,7 +15,7 @@ A constraint-space representation learning which can provide a modality-independ
 │   ├── env/            # CarRacing data collection and replay
 │   ├── data/           # Data loading and saving scripts
 │   ├── dataset/        # Dataset preparation and loaders
-│   ├── features/       # Feature engineering
+│   ├── stl/            # Physical constraints and STL robustness
 │   ├── models/         # Model training and evaluation
 │   ├── visualization/  # Plots and visualizations
 │   └── **init**.py
@@ -194,7 +194,7 @@ Set the `collect_env_data` block in `src/main.py` to `"run"`, adjust the `collec
 | `corner_speed`     | `16.0`    | Minimum curvature-based speed target       |
 | `abort_spin`       | `False`   | Stop early on extreme spin                                                         |
 
-Output per episode (`episode_XXXXX/`): `trajectory.npz`, state and transition CSVs, `metadata.json`, optional `frames/` PNGs. The dataset folder also holds `manifest.json`, which lists the settings and one summary per episode.
+Output: one `episode_XXXXX.tar` per episode (WebDataset: `png`, `state.npy`, `extras.npy`, `action.npy`, `json` per observation). The dataset folder also holds `data_info.json`, which lists the settings and one summary per episode.
 
 For `N` actions an episode has `N+1` states and images: index `t` is the observation before action `t`, and `t+1` is its result.
 

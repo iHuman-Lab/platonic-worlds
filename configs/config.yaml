@@ -1,3 +1,6 @@
+# Reproducibility -----------------------------------------------------
+random_state: 42
+
 # Paths ----------------------------------------------------------------
 log_dir: 'tb_logs'
 
@@ -19,21 +22,60 @@ conv_jepa_horizon: 2 # future steps predicted (= number of actions conditioned o
 
 # Env data collection --------------------------------------------------
 collect:
-  episodes: 5 # number of generated tracks
-  max_steps: 6000 # emergency cap per episode
+  episodes: 100 # number of generated tracks
+  max_steps: 6000 # emergency cap per episode, in recorded steps
+  frame_skip: 3 # simulator steps per recorded step; the action is held (50 / frame_skip Hz)
   seed: 42 # first track seed, incremented per episode
-  output: 'dataset' # new directory per run; existing datasets are not overwritten
+  output: 'dataset' # new directory per run (one tar per episode); existing datasets are not overwritten
   collection_mode: 'images' # watch | data | images
   image_resolution: 'low' # low | middle | high
   render: true # show the live simulator
-  save_png: False # also export individual PNG frames
   domain_randomize: False # randomize road/background colors
   exploration: 0.08 # steering noise strength, 0 to 1
   max_speed: 48.0 # straight speed target (world units/s)
   corner_speed: 16.0 # minimum curvature-based speed target
+  safe_exploration: True # False: steering noise stays at full strength near the road edge
+  boundary_recovery: True # False: no edge-recovery override, so the car can leave the road
+  speed_scale: [0.96, 1.0] # per-episode speed factor range [low, high]; above 1 overshoots corners
   abort_spin: False # early cutoff on extreme spin
+
+# CarRacing episode windows --------------------------------------------
+dataset:
+  root: 'dataset' # folder of run subfolders, each with data_info.json and episode tars
+  split_file: 'dataset/split.json' # which seeds went to train/val/test
+  val_per_run: 3 # held-out seeds per run for validation
+  test_per_run: 2 # held-out seeds per run for testing
+  window_length: 4 # frames per sample
+  stride: 1 # recorded steps between window starts
+  skip_intro: 20 # drop the zoom-in intro frames
+  preprocess: ['resize'] # ordered image steps: grayscale | resize
+  image_size: 96 # target size for the resize step (96 = native, unchanged)
+  shuffle_buffer: 1000 # windows held for shuffling (train only)
+  batch_size: 32
+  num_workers: 4
+
+# Physical constraints -------------------------------------------------
+# margin = (signal - threshold) / scale for a lower bound, (threshold - signal) / scale
+# for an upper bound. Positive means satisfied. Order here is the output order.
+constraints:
+  road_clearance: {signal: clearance, bound: lower, threshold: 0.0, scale: 3.0} # stay on the road
+  heading_error: {signal: abs_heading, bound: upper, threshold: 0.4, scale: 0.3} # rad, stay aligned with the road
+  speed_limit: {signal: speed, bound: upper, threshold: 50.0, scale: 20.0} # world units/s
+  sideslip: {signal: abs_sideslip, bound: upper, threshold: 0.1, scale: 0.1} # rad, stay stable
+  road_progress: {signal: road_speed, bound: lower, threshold: 10.0, scale: 20.0} # keep moving along the road
+
+# STL specs over constraint margins ------------------------------------
+# Nodes: pred | always | eventually | not | and | or | implies (see src/stl/specs.py).
+# Windows are dataset.window_length frames long; robustness is read at the first frame.
+stl:
+  scale: 5.0 # logsumexp smoothing for training (<= 0 would mean exact min/max)
+  specs:
+    stay_on_road: {always: {pred: road_clearance}}
+    obey_speed_limit: {always: {pred: speed_limit}}
+    stay_aligned: {always: {pred: heading_error}}
+    recover_to_road: {always: {implies: [{not: {pred: road_clearance}}, {eventually: {pred: road_clearance}}]}}
 
 # Env episode replay ---------------------------------------------------
 preview:
-  episode: 'dataset/episode_00000' # episode folder or trajectory.npz
+  episode: 'dataset/episode_00000.tar' # episode tar
   fps: 50 # playback frame rate (50 = real time)

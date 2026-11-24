@@ -1,37 +1,22 @@
-"""Episode buffers, image capture, and NPZ/CSV/JSON/PNG export."""
+"""Episode buffers, image capture, and tar export of collected episodes."""
 
 from __future__ import annotations
 
-import csv
-import json
 from dataclasses import dataclass, field
-from pathlib import Path
 
 import gymnasium as gym
 import numpy as np
 from PIL import Image
 
-from env.configuration import IMAGE_SIZES, SIMULATION_FPS
+from data.episode_tar import write_episode_tar
+from env.configuration import (
+    CONTROLLER_DETAIL_NAMES,
+    EXTRA_NAMES,
+    IMAGE_SIZES,
+    SIMULATION_FPS,
+)
 from env.random_road_agent import MODE_NAMES
 from env.road_geometry import STATE_NAMES, STATE_UNITS
-
-CONTROLLER_DETAIL_NAMES = (
-    "target_speed",
-    "target_heading_error",
-    "preview_curvature_abs",
-    "steering_noise",
-)
-EXTRA_NAMES = (
-    "forward_velocity",
-    "lateral_velocity_right",
-    "steering_angle_mean",
-    "wheel_contact_count",
-    "progress",
-    "center_distance",
-    "nearest_segment",
-    "beta_valid",
-    "road_heading",
-)
 
 
 @dataclass
@@ -61,9 +46,9 @@ class EpisodeData:
             [diagnostics[name] for name in CONTROLLER_DETAIL_NAMES]
         )
 
-    def to_arrays(self, geometry, seed):
+    def to_arrays(self, geometry, seed, frame_skip):
         action_count = len(self.actions)
-        times = np.arange(action_count + 1, dtype=np.float64) / SIMULATION_FPS
+        times = np.arange(action_count + 1, dtype=np.float64) * frame_skip / SIMULATION_FPS
         return {
             "states": np.asarray(self.states, dtype=np.float64),
             "time_s": times,
@@ -101,11 +86,11 @@ def capture_image(env, observation, resolution):
     return rgb
 
 
-def save_episode(
-    output_dir, episode_id, recording, geometry, summary, image_file, save_png
-):
-    """Export the episode arrays, metadata, and optional PNG frames."""
-    arrays = recording.to_arrays(geometry, summary["seed"])
+def save_episode(output_dir, episode_id, recording, geometry, summary, image_file):
+    """Write the episode as one WebDataset tar."""
+    arrays = recording.to_arrays(
+        geometry, summary["seed"], summary["frame_skip"]
+    )
     images = None
     try:
         if summary["collection_mode"] == "images":
@@ -117,39 +102,7 @@ def save_episode(
                 shape=(len(recording.states), *summary["image_shape"]),
             )
             arrays["images"] = images
-
-        episode_dir = output_dir / f"episode_{episode_id:05d}"
-        episode_dir.mkdir(parents=True, exist_ok=False)
-        np.savez_compressed(episode_dir / "trajectory.npz", **arrays)
-        write_csv(
-            episode_dir / "states.csv",
-            ["observation_index", "time_s", *STATE_NAMES, *EXTRA_NAMES],
-            state_rows(arrays),
-        )
-        write_csv(
-            episode_dir / "transitions.csv",
-            [
-                "action_index",
-                "time_s",
-                "steering",
-                "gas",
-                "brake",
-                "reward",
-                "terminated",
-                "truncated",
-                "collector_cutoff",
-                "controller_mode",
-                *CONTROLLER_DETAIL_NAMES,
-            ],
-            transition_rows(arrays),
-        )
-        with (episode_dir / "metadata.json").open("w") as metadata_file:
-            json.dump(summary, metadata_file, indent=2)
-        if save_png:
-            frames_dir = episode_dir / "frames"
-            frames_dir.mkdir()
-            for index, image in enumerate(arrays["images"]):
-                Image.fromarray(image).save(frames_dir / f"frame_{index:05d}.png")
+        write_episode_tar(arrays, output_dir / f"episode_{episode_id:05d}.tar")
     finally:
         if images is not None:
             images._mmap.close()
@@ -176,7 +129,8 @@ def build_episode_summary(
         "seed": args.seed + episode_id,
         "env_id": "CarRacing-v3",
         "gymnasium_version": gym.__version__,
-        "fps": SIMULATION_FPS,
+        "fps": SIMULATION_FPS / args.frame_skip,
+        "frame_skip": args.frame_skip,
         "num_actions": action_count,
         "num_observations": action_count + 1,
         "total_reward": total_reward,
@@ -207,7 +161,8 @@ def build_dataset_info(args):
     return {
         "env_id": "CarRacing-v3",
         "gymnasium_version": gym.__version__,
-        "fps": SIMULATION_FPS,
+        "fps": SIMULATION_FPS / args.frame_skip,
+        "frame_skip": args.frame_skip,
         "episode_seed_rule": "base_seed + episode_index",
         "base_seed": args.seed,
         "state_names": list(STATE_NAMES),
@@ -238,38 +193,6 @@ def build_dataset_info(args):
         "image_resolution": args.image_resolution
         if args.collection_mode == "images"
         else None,
-        "save_png": args.save_png,
+        "format": "WebDataset tar, one episode_XXXXX.tar per episode",
         "episodes": [],
     }
-
-
-def write_csv(path: Path, header: list[str], rows):
-    with path.open("w", newline="") as csv_file:
-        writer = csv.writer(csv_file)
-        writer.writerow(header)
-        writer.writerows(rows)
-
-
-def state_rows(arrays):
-    for index, state in enumerate(arrays["states"]):
-        yield [
-            index,
-            float(arrays["time_s"][index]),
-            *state.tolist(),
-            *arrays["extras"][index].tolist(),
-        ]
-
-
-def transition_rows(arrays):
-    for index, action in enumerate(arrays["actions"]):
-        yield [
-            index,
-            float(arrays["time_s"][index]),
-            *action.tolist(),
-            float(arrays["rewards"][index]),
-            bool(arrays["terminated"][index]),
-            bool(arrays["truncated"][index]),
-            bool(arrays["collector_cutoff"][index]),
-            int(arrays["controller_modes"][index]),
-            *arrays["controller_details"][index].tolist(),
-        ]

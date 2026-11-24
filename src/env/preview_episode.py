@@ -7,36 +7,29 @@ from __future__ import annotations
 
 import numpy as np
 import pygame
+import webdataset as wds
 
 from env.random_road_agent import MODE_NAMES
 from env.road_geometry import STATE_NAMES
 
 
 def load_episode(filename):
-    with np.load(filename, allow_pickle=False) as dataset:
-        if "images" not in dataset:
-            raise SystemExit(
-                "This is a data-only episode. "
-                "Collect with collect.collection_mode: images to enable replay."
-            )
-        episode = {
-            name: dataset[name]
-            for name in (
-                "images",
-                "states",
-                "actions",
-                "rewards",
-                "time_s",
-                "controller_modes",
-            )
-        }
-        frames = episode["images"]
-        states = episode["states"]
-        actions = episode["actions"]
-        times = episode["time_s"]
-        if not (len(frames) == len(states) == len(times) == len(actions) + 1):
-            raise ValueError("Dataset indices do not align")
-
+    """Read an episode tar into arrays indexed by observation."""
+    samples = list(wds.WebDataset(str(filename), shardshuffle=False).decode("rgb8"))
+    if not samples or "png" not in samples[0]:
+        raise SystemExit(
+            "This is a data-only episode. "
+            "Collect with collect.collection_mode: images to enable replay."
+        )
+    meta = [sample["json"] for sample in samples]
+    episode = {
+        "images": np.stack([sample["png"] for sample in samples]),
+        "states": np.stack([sample["state.npy"] for sample in samples]),
+        "actions": np.stack([sample["action.npy"] for sample in samples[:-1]]),
+        "rewards": np.array([step["reward"] for step in meta[:-1]]),
+        "time_s": np.array([step["time_s"] for step in meta]),
+        "controller_modes": np.array([step["controller_mode"] for step in meta[:-1]]),
+    }
     return episode
 
 
@@ -122,7 +115,7 @@ def play_episode(episode, filename, fps):
     pygame.init()
     try:
         window = pygame.display.set_mode((1190, 660))
-        pygame.display.set_caption(f"Saved CarRacing episode: {filename.parent.name}")
+        pygame.display.set_caption(f"Saved CarRacing episode: {filename.stem}")
         font = pygame.font.SysFont("monospace", 18)
         title_font = pygame.font.SysFont("monospace", 22, bold=True)
         clock = pygame.time.Clock()

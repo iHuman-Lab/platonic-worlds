@@ -29,14 +29,19 @@ class RandomRoadAgent:
         exploration: float = 0.08,
         max_speed: float = 48.0,
         corner_speed: float = 16.0,
+        safe_exploration: bool = True,
+        boundary_recovery: bool = True,
+        speed_scale: tuple[float, float] = (0.96, 1.0),
     ):
         self.geometry = geometry
         self.rng = rng
         self.exploration = float(exploration)
         self.noise_state = 0.0
-        self.speed_scale = float(rng.uniform(0.96, 1.0))
+        self.speed_scale = float(rng.uniform(*speed_scale))
         self.max_speed = float(max_speed)
         self.corner_speed = float(corner_speed)
+        self.safe_exploration = bool(safe_exploration)
+        self.boundary_recovery = bool(boundary_recovery)
 
     def act(self, state: np.ndarray, road: RoadContext) -> tuple[np.ndarray, int, dict]:
         yaw_rate = state[5]
@@ -88,7 +93,7 @@ class RandomRoadAgent:
         distance_to_edge = min(left_clearance, right_clearance)
         mode = MODE_NORMAL
 
-        if (
+        if self.boundary_recovery and (
             distance_to_edge < 1.6
             or abs(lateral_error) > self.geometry.half_width * 0.65
         ):
@@ -161,5 +166,7 @@ class RandomRoadAgent:
         self.noise_state = (
             0.96 * self.noise_state + math.sqrt(1.0 - 0.96**2) * self.rng.normal()
         )
-        safe_margin = float(np.clip((distance_to_edge - 0.8) / 3.0, 0.0, 1.0))
+        safe_margin = 1.0
+        if self.safe_exploration:
+            safe_margin = float(np.clip((distance_to_edge - 0.8) / 3.0, 0.0, 1.0))
         return self.exploration * safe_margin * self.noise_state / (1.0 + speed / 8.0)

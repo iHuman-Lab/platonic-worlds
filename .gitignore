@@ -126,3 +126,6 @@ videos/
 *.mp4
 *.avi
 *.gif
+
+# Collected CarRacing episodes
+/dataset/

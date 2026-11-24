@@ -19,6 +19,19 @@ from env.random_road_agent import RandomRoadAgent
 from env.road_geometry import extract_state
 
 
+def step_repeated(environment, action, frame_skip, yaw_changes):
+    """Hold one action for frame_skip simulator steps, stopping early at episode end."""
+    total_reward = 0.0
+    for _ in range(frame_skip):
+        observation, reward, terminated, truncated, info = environment.step(action)
+        total_reward += reward
+        hull = environment.unwrapped.car.hull
+        yaw_changes.append(float(hull.angularVelocity) / SIMULATION_FPS)
+        if terminated or truncated:
+            break
+    return observation, total_reward, terminated, truncated, info
+
+
 def collect_episode(environment, args, episode_id, output_dir):
     """Reset, drive, record, and save one episode in execution order."""
     seed = args.seed + episode_id
@@ -30,6 +43,9 @@ def collect_episode(environment, args, episode_id, output_dir):
         exploration=args.exploration,
         max_speed=args.max_speed,
         corner_speed=args.corner_speed,
+        safe_exploration=args.safe_exploration,
+        boundary_recovery=args.boundary_recovery,
+        speed_scale=args.speed_scale,
     )
     state, road, extras = extract_state(environment, geometry)
     recording = EpisodeData(states=[state], extras=[extras])
@@ -54,12 +70,13 @@ def collect_episode(environment, args, episode_id, output_dir):
                 break
 
             action, controller_mode, diagnostics = controller.act(state, road)
-            observation, reward, terminated, truncated, info = environment.step(action)
+            observation, reward, terminated, truncated, info = step_repeated(
+                environment, action, args.frame_skip, yaw_changes
+            )
             next_state, next_road, next_extras = extract_state(
                 environment, geometry, road.nearest_segment
             )
 
-            yaw_changes.append(float(next_state[5]) / SIMULATION_FPS)
             spin_cutoff = bool(
                 args.abort_spin
                 and (
@@ -124,7 +141,6 @@ def collect_episode(environment, args, episode_id, output_dir):
                 geometry,
                 summary,
                 image_file,
-                args.save_png,
             )
     return summary
 
