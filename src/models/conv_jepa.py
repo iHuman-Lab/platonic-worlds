@@ -4,17 +4,29 @@ import torch
 from torch import nn
 
 
-class ConvEncoder(nn.Module):
-    """The imitation CNN's conv trunk, ending in a latent vector. [B, T, 84, 84] -> [B, dim]."""
+CONV_LAYERS = ((8, 4), (4, 2), (3, 1))  # (kernel, stride) of the three conv layers
+CONV_CHANNELS = 64  # channels after the last conv layer
 
-    def __init__(self, in_channels: int = 4, dim: int = 512):
+
+def conv_output_size(image_size: int) -> int:
+    """Flattened size after the conv trunk for a square input (84 -> 3136)."""
+    size = image_size
+    for kernel, stride in CONV_LAYERS:
+        size = (size - kernel) // stride + 1
+    return CONV_CHANNELS * size * size
+
+
+class ConvEncoder(nn.Module):
+    """The imitation CNN's conv trunk, ending in a latent vector. [B, T, S, S] -> [B, dim]."""
+
+    def __init__(self, in_channels: int = 4, dim: int = 512, image_size: int = 84):
         super().__init__()
         self.net = nn.Sequential(
             nn.Conv2d(in_channels, 32, 8, 4), nn.ReLU(),
             nn.Conv2d(32, 64, 4, 2), nn.ReLU(),
-            nn.Conv2d(64, 64, 3, 1), nn.ReLU(),
+            nn.Conv2d(64, CONV_CHANNELS, 3, 1), nn.ReLU(),
             nn.Flatten(),
-            nn.Linear(3136, dim),
+            nn.Linear(conv_output_size(image_size), dim),
         )
 
     def forward(self, x):

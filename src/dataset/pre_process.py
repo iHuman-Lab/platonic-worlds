@@ -24,6 +24,18 @@ class Grayscale:
         return (images * weights).sum(dim=1, keepdim=True)
 
 
+class CropHud:
+    """Drop the bottom HUD rows (speed/steering bars) and centre-crop the width to a square."""
+
+    def __init__(self, hud_rows: int) -> None:
+        self.hud_rows = hud_rows
+
+    def __call__(self, images: torch.Tensor) -> torch.Tensor:
+        height = images.shape[-2] - self.hud_rows
+        margin = (images.shape[-1] - height) // 2
+        return images[..., :height, margin : margin + height]
+
+
 class Resize:
     """Resize (T, C, H, W) to (T, C, size, size); unchanged if already that size."""
 
@@ -55,6 +67,7 @@ class ComposePreprocessor:
 
 
 STEP_BUILDERS = {
+    "crop_hud": lambda cfg: CropHud(cfg["hud_rows"]),
     "grayscale": lambda cfg: Grayscale(),
     "resize": lambda cfg: Resize(cfg["image_size"]),
 }

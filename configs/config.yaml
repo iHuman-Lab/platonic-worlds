@@ -19,6 +19,17 @@ epochs: 20
 conv_jepa_dim: 512 # latent size of the CNN encoder
 conv_jepa_frames: 2 # frames fed to the encoder
 conv_jepa_horizon: 2 # future steps predicted (= number of actions conditioned on)
+conv_jepa_action_dim: 3 # steer, gas, brake
+conv_jepa_act_embed: 32 # size of the action embedding
+conv_jepa_lr: 3.0e-4
+conv_jepa_weight_decay: 1.0e-4
+conv_jepa_ema: 0.99 # EMA decay of the target encoder
+conv_jepa_reg: 1.0 # weight of the variance hinge (anti-collapse)
+conv_jepa_constraint_weight: 1.0 # weight of the constraint regression loss
+conv_jepa_constraint_hidden: 128 # hidden size of the constraint head
+conv_jepa_violation_weight: 10.0 # extra weight on squared error where the true margin is below 0 (violations are rare)
+conv_jepa_constraint_to_encoder: True # False: head only probes (gradient detached from the encoder)
+log_every_n_steps: 10
 
 # Env data collection --------------------------------------------------
 collect:
@@ -45,11 +56,12 @@ dataset:
   split_file: 'dataset/split.json' # which seeds went to train/val/test
   val_per_run: 3 # held-out seeds per run for validation
   test_per_run: 2 # held-out seeds per run for testing
-  window_length: 4 # frames per sample
+  window_length: 4 # frames per sample; ConvJEPA needs conv_jepa_frames + conv_jepa_horizon
   stride: 1 # recorded steps between window starts
   skip_intro: 20 # drop the zoom-in intro frames
-  preprocess: ['resize'] # ordered image steps: grayscale | resize
-  image_size: 96 # target size for the resize step (96 = native, unchanged)
+  preprocess: ['crop_hud', 'grayscale', 'resize'] # ordered image steps: crop_hud | grayscale | resize (ConvJEPA needs grayscale)
+  hud_rows: 12 # bottom rows of the 96x96 frame that show speed/steering bars (leaks state)
+  image_size: 84 # target size for the resize step (the conv trunk is built for this size)
   shuffle_buffer: 1000 # windows held for shuffling (train only)
   batch_size: 32
   num_workers: 4
@@ -62,7 +74,7 @@ constraints:
   heading_error: {signal: abs_heading, bound: upper, threshold: 0.4, scale: 0.3} # rad, stay aligned with the road
   speed_limit: {signal: speed, bound: upper, threshold: 50.0, scale: 20.0} # world units/s
   sideslip: {signal: abs_sideslip, bound: upper, threshold: 0.1, scale: 0.1} # rad, stay stable
-  road_progress: {signal: road_speed, bound: lower, threshold: 10.0, scale: 20.0} # keep moving along the road
+  keep_pace: {signal: road_speed, bound: lower, threshold: 16.0, scale: 10.0} # speed along the road stays above the corner pace
 
 # STL specs over constraint margins ------------------------------------
 # Nodes: pred | always | eventually | not | and | or | implies (see src/stl/specs.py).
