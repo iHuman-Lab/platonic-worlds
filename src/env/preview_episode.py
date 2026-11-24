@@ -5,23 +5,19 @@ Controls: SPACE=pause, left/right arrows=step, ESC or Q=quit.
 
 from __future__ import annotations
 
-import argparse
-import os
-from pathlib import Path
-
 import numpy as np
 import pygame
 
-from random_road_agent import MODE_NAMES
-from road_geometry import STATE_NAMES
+from env.random_road_agent import MODE_NAMES
+from env.road_geometry import STATE_NAMES
 
 
-def _load_episode(filename):
+def load_episode(filename):
     with np.load(filename, allow_pickle=False) as dataset:
         if "images" not in dataset:
             raise SystemExit(
                 "This is a data-only episode. "
-                "Collect with --collection-mode images to enable replay."
+                "Collect with collect.collection_mode: images to enable replay."
             )
         episode = {
             name: dataset[name]
@@ -44,7 +40,7 @@ def _load_episode(filename):
     return episode
 
 
-def _handle_events(index, playing, last_index):
+def handle_events(index, playing, last_index):
     running = True
     for event in pygame.event.get():
         if event.type == pygame.QUIT:
@@ -63,19 +59,17 @@ def _handle_events(index, playing, last_index):
     return index, playing, running
 
 
-def _draw_frame(window, frames, index):
+def draw_frame(window, frames, index):
     window.fill((20, 25, 35))
     rgb = frames[index]
     surface = pygame.surfarray.make_surface(np.transpose(rgb, (1, 0, 2)))
     scale = min(576 / rgb.shape[1], 576 / rgb.shape[0])
     size = (round(rgb.shape[1] * scale), round(rgb.shape[0] * scale))
     surface = pygame.transform.scale(surface, size)
-    window.blit(
-        surface, (22 + (576 - size[0]) // 2, 55 + (576 - size[1]) // 2)
-    )
+    window.blit(surface, (22 + (576 - size[0]) // 2, 55 + (576 - size[1]) // 2))
 
 
-def _overlay_lines(episode, index):
+def overlay_lines(episode, index):
     states = episode["states"]
     actions = episode["actions"]
     rewards = episode["rewards"]
@@ -84,8 +78,7 @@ def _overlay_lines(episode, index):
     action_count = len(actions)
     lines = [
         (
-            f"Observation {index:04d}/{action_count:04d}  "
-            f"t={times[index]:.2f}s",
+            f"Observation {index:04d}/{action_count:04d}  t={times[index]:.2f}s",
             True,
         ),
         ("Vehicle / road physical state", True),
@@ -102,13 +95,11 @@ def _overlay_lines(episode, index):
         [
             ("Action at current observation", True),
             (
-                f" steer={action[0]:+.3f} gas={action[1]:.3f} "
-                f"brake={action[2]:.3f}",
+                f" steer={action[0]:+.3f} gas={action[1]:.3f} brake={action[2]:.3f}",
                 False,
             ),
             (
-                f" reward={rewards[index]:+.3f}  "
-                f"mode={MODE_NAMES[int(modes[index])]}",
+                f" reward={rewards[index]:+.3f}  mode={MODE_NAMES[int(modes[index])]}",
                 False,
             ),
         ]
@@ -116,26 +107,22 @@ def _overlay_lines(episode, index):
     return lines
 
 
-def _draw_overlay(window, font, title_font, episode, index):
-    for line, (text, is_heading) in enumerate(_overlay_lines(episode, index)):
+def draw_overlay(window, font, title_font, episode, index):
+    for line, (text, is_heading) in enumerate(overlay_lines(episode, index)):
         if not text:
             continue
         color = (230, 235, 245) if is_heading else (193, 208, 224)
         selected_font = title_font if is_heading else font
-        window.blit(
-            selected_font.render(text, True, color), (620, 23 + line * 25)
-        )
+        window.blit(selected_font.render(text, True, color), (620, 23 + line * 25))
     hint = "SPACE pause | LEFT/RIGHT step | Q quit"
     window.blit(font.render(hint, True, (255, 210, 150)), (20, 637))
 
 
-def _play_episode(episode, filename, fps):
+def play_episode(episode, filename, fps):
     pygame.init()
     try:
         window = pygame.display.set_mode((1190, 660))
-        pygame.display.set_caption(
-            f"Saved CarRacing episode: {filename.parent.name}"
-        )
+        pygame.display.set_caption(f"Saved CarRacing episode: {filename.parent.name}")
         font = pygame.font.SysFont("monospace", 18)
         title_font = pygame.font.SysFont("monospace", 22, bold=True)
         clock = pygame.time.Clock()
@@ -144,11 +131,9 @@ def _play_episode(episode, filename, fps):
         index = 0
         action_count = len(episode["actions"])
         while running:
-            index, playing, running = _handle_events(
-                index, playing, action_count
-            )
-            _draw_frame(window, episode["images"], index)
-            _draw_overlay(window, font, title_font, episode, index)
+            index, playing, running = handle_events(index, playing, action_count)
+            draw_frame(window, episode["images"], index)
+            draw_overlay(window, font, title_font, episode, index)
             pygame.display.flip()
             clock.tick(max(fps, 1))
             if playing and index < action_count:
@@ -157,29 +142,3 @@ def _play_episode(episode, filename, fps):
                 playing = False
     finally:
         pygame.quit()
-
-
-def main():
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        "episode", help="Path to episode_00000 folder or trajectory.npz"
-    )
-    parser.add_argument(
-        "--fps", type=int, default=50, help="Playback frame rate"
-    )
-    args = parser.parse_args()
-    filename = Path(args.episode)
-    if filename.is_dir():
-        filename = filename / "trajectory.npz"
-    if not (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")):
-        raise SystemExit(
-            "Preview needs a desktop/GUI. "
-            "Use --save-png for headless inspection."
-        )
-
-    episode = _load_episode(filename)
-    _play_episode(episode, filename, args.fps)
-
-
-if __name__ == "__main__":
-    main()

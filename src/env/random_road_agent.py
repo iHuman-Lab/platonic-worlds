@@ -11,7 +11,7 @@ import math
 
 import numpy as np
 
-from road_geometry import RoadContext, TrackGeometry, wrap_angle
+from env.road_geometry import RoadContext, TrackGeometry, wrap_angle
 
 MODE_NORMAL = 0
 MODE_RECOVERY = 1
@@ -38,28 +38,22 @@ class RandomRoadAgent:
         self.max_speed = float(max_speed)
         self.corner_speed = float(corner_speed)
 
-    def act(
-        self, state: np.ndarray, road: RoadContext
-    ) -> tuple[np.ndarray, int, dict]:
+    def act(self, state: np.ndarray, road: RoadContext) -> tuple[np.ndarray, int, dict]:
         yaw_rate = state[5]
         curvature = state[10]
         speed = state[11]
-        heading_to_target_error, distance = self._steering_target(state, road)
-        desired_speed, anticipated_curvature = self._plan_speed(
-            road.progress, speed
-        )
+        heading_to_target_error, distance = self.steering_target(state, road)
+        desired_speed, anticipated_curvature = self.plan_speed(road.progress, speed)
         distance_to_edge = min(state[8], state[9])
-        noise = self._steering_noise(distance_to_edge, speed)
+        noise = self.steering_noise(distance_to_edge, speed)
 
         # Pure pursuit with yaw-rate damping to counter rotation.
-        steering = math.atan2(
-            2.0 * 4.8 * math.sin(heading_to_target_error), distance
-        )
+        steering = math.atan2(2.0 * 4.8 * math.sin(heading_to_target_error), distance)
         steering += 0.10 * (yaw_rate - speed * curvature) + noise
         speed_error = desired_speed - speed
         gas = float(np.clip(0.18 * speed_error, 0.0, 1.0))
         brake = float(np.clip(-0.10 * speed_error, 0.0, 0.75))
-        steering, gas, brake, mode = self._apply_safety_controls(
+        steering, gas, brake, mode = self.apply_safety_controls(
             state, heading_to_target_error, steering, gas, brake
         )
 
@@ -79,9 +73,7 @@ class RandomRoadAgent:
         }
         return action, mode, diagnostics
 
-    def _apply_safety_controls(
-        self, state, target_heading_error, steering, gas, brake
-    ):
+    def apply_safety_controls(self, state, target_heading_error, steering, gas, brake):
         """Apply boundary recovery before the higher-priority spin controls."""
         yaw_rate = state[5]
         (
@@ -124,22 +116,20 @@ class RandomRoadAgent:
 
         return steering, gas, brake, mode
 
-    def _steering_target(self, state, road):
+    def steering_target(self, state, road):
         """Return heading error and distance to the look-ahead target."""
         x, y, body_angle = state[:3]
         speed = state[11]
         preview_distance = 6.0 + 0.42 * speed
         target = self.geometry.point_at(road.progress + preview_distance)
-        desired_heading = math.atan2(
-            float(target[1]) - y, float(target[0]) - x
-        )
+        desired_heading = math.atan2(float(target[1]) - y, float(target[0]) - x)
         actual_heading = body_angle + math.pi / 2.0
         # Left of target gives a positive command (right steering).
         heading_error = wrap_angle(actual_heading - desired_heading)
         distance = max(float(np.linalg.norm(target - np.array([x, y]))), 1.0)
         return heading_error, distance
 
-    def _plan_speed(self, progress, speed):
+    def plan_speed(self, progress, speed):
         """Plan braking for the upcoming bends along the road."""
         distances = np.linspace(0.0, max(35.0, speed * 2.5), 18)
         curvatures = [
@@ -165,17 +155,11 @@ class RandomRoadAgent:
 
         return desired_speed, anticipated_curvature
 
-    def _steering_noise(self, distance_to_edge, speed):
+    def steering_noise(self, distance_to_edge, speed):
         # Ornstein-Uhlenbeck-like correlated noise. This encourages exploratory
         # behavior without abrupt independent random steering every frame.
         self.noise_state = (
-            0.96 * self.noise_state
-            + math.sqrt(1.0 - 0.96**2) * self.rng.normal()
+            0.96 * self.noise_state + math.sqrt(1.0 - 0.96**2) * self.rng.normal()
         )
         safe_margin = float(np.clip((distance_to_edge - 0.8) / 3.0, 0.0, 1.0))
-        return (
-            self.exploration
-            * safe_margin
-            * self.noise_state
-            / (1.0 + speed / 8.0)
-        )
+        return self.exploration * safe_margin * self.noise_state / (1.0 + speed / 8.0)

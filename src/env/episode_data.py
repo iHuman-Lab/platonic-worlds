@@ -11,9 +11,9 @@ import gymnasium as gym
 import numpy as np
 from PIL import Image
 
-from configuration import IMAGE_SIZES, SIMULATION_FPS
-from random_road_agent import MODE_NAMES
-from road_geometry import STATE_NAMES, STATE_UNITS
+from env.configuration import IMAGE_SIZES, SIMULATION_FPS
+from env.random_road_agent import MODE_NAMES
+from env.road_geometry import STATE_NAMES, STATE_UNITS
 
 CONTROLLER_DETAIL_NAMES = (
     "target_speed",
@@ -68,10 +68,7 @@ class EpisodeData:
             "states": np.asarray(self.states, dtype=np.float64),
             "time_s": times,
             "extras": np.asarray(
-                [
-                    [float(extra[name]) for name in EXTRA_NAMES]
-                    for extra in self.extras
-                ]
+                [[float(extra[name]) for name in EXTRA_NAMES] for extra in self.extras]
             ),
             "actions": np.asarray(self.actions, dtype=np.float32).reshape(
                 action_count, 3
@@ -80,9 +77,7 @@ class EpisodeData:
             "terminated": np.asarray(self.terminated, dtype=bool),
             "truncated": np.asarray(self.truncated, dtype=bool),
             "collector_cutoff": np.asarray(self.collector_cutoff, dtype=bool),
-            "controller_modes": np.asarray(
-                self.controller_modes, dtype=np.uint8
-            ),
+            "controller_modes": np.asarray(self.controller_modes, dtype=np.uint8),
             "controller_details": np.asarray(
                 self.controller_details, dtype=np.float32
             ).reshape(action_count, len(CONTROLLER_DETAIL_NAMES)),
@@ -129,7 +124,7 @@ def save_episode(
         write_csv(
             episode_dir / "states.csv",
             ["observation_index", "time_s", *STATE_NAMES, *EXTRA_NAMES],
-            _state_rows(arrays),
+            state_rows(arrays),
         )
         write_csv(
             episode_dir / "transitions.csv",
@@ -146,7 +141,7 @@ def save_episode(
                 "controller_mode",
                 *CONTROLLER_DETAIL_NAMES,
             ],
-            _transition_rows(arrays),
+            transition_rows(arrays),
         )
         with (episode_dir / "metadata.json").open("w") as metadata_file:
             json.dump(summary, metadata_file, indent=2)
@@ -154,9 +149,7 @@ def save_episode(
             frames_dir = episode_dir / "frames"
             frames_dir.mkdir()
             for index, image in enumerate(arrays["images"]):
-                Image.fromarray(image).save(
-                    frames_dir / f"frame_{index:05d}.png"
-                )
+                Image.fromarray(image).save(frames_dir / f"frame_{index:05d}.png")
     finally:
         if images is not None:
             images._mmap.close()
@@ -200,21 +193,17 @@ def build_episode_summary(
         "corner_speed_target": args.corner_speed,
         "mean_speed": float(np.mean(speeds)) if action_count else 0.0,
         "peak_speed": max(speeds, default=0.0),
-        "gym_terminated_last": bool(recording.terminated[-1])
-        if recording.terminated
-        else False,
-        "gym_truncated_last": bool(recording.truncated[-1])
-        if recording.truncated
-        else False,
-        "last_collector_cutoff": bool(recording.collector_cutoff[-1])
-        if recording.collector_cutoff
-        else False,
+        "gym_terminated_last": bool(recording.terminated and recording.terminated[-1]),
+        "gym_truncated_last": bool(recording.truncated and recording.truncated[-1]),
+        "last_collector_cutoff": bool(
+            recording.collector_cutoff and recording.collector_cutoff[-1]
+        ),
         "state_names": list(STATE_NAMES),
         "extra_names": list(EXTRA_NAMES),
     }
 
 
-def build_manifest(args):
+def build_dataset_info(args):
     return {
         "env_id": "CarRacing-v3",
         "gymnasium_version": gym.__version__,
@@ -225,8 +214,7 @@ def build_manifest(args):
         "state_units": list(STATE_UNITS),
         "state_reference": "car hull center of mass in Box2D world frame",
         "states_shape_rule": (
-            "N+1 observations for N transitions; "
-            "optional images indexed identically"
+            "N+1 observations for N transitions; optional images indexed identically"
         ),
         "action_names": ["steering", "gas", "brake"],
         "steering_sign": "-1=left, +1=right",
@@ -235,8 +223,7 @@ def build_manifest(args):
         ),
         "road_geometry": "track array: (alpha,beta,x,y), world coordinates",
         "random_policy": (
-            "privileged road-following exploratory behavior policy; "
-            "not learned"
+            "privileged road-following exploratory behavior policy; not learned"
         ),
         "time_reference": "zero is the observation returned by reset()",
         "controller_modes": list(MODE_NAMES),
@@ -263,7 +250,7 @@ def write_csv(path: Path, header: list[str], rows):
         writer.writerows(rows)
 
 
-def _state_rows(arrays):
+def state_rows(arrays):
     for index, state in enumerate(arrays["states"]):
         yield [
             index,
@@ -273,7 +260,7 @@ def _state_rows(arrays):
         ]
 
 
-def _transition_rows(arrays):
+def transition_rows(arrays):
     for index, action in enumerate(arrays["actions"]):
         yield [
             index,

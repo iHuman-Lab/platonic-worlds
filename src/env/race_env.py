@@ -4,8 +4,7 @@ from __future__ import annotations
 
 import numpy as np
 from gymnasium.envs.box2d.car_racing import TRACK_WIDTH, CarRacing
-
-from road_geometry import TrackGeometry
+from env.road_geometry import TrackGeometry
 
 
 class FinishLineTracker:
@@ -27,26 +26,20 @@ class FinishLineTracker:
     def update(self, position):
         position = np.asarray(position, dtype=float)
         geometry = self.geometry
-        index, fraction, _, _ = geometry.closest_segment(
-            position, self.segment
-        )
-        progress = (
-            geometry.cumulative[index] + fraction * geometry.seg_lengths[index]
-        )
+        index, fraction, _, _ = geometry.closest_segment(position, self.segment)
+        progress = geometry.cumulative[index] + fraction * geometry.seg_lengths[index]
         # Unwrap progress across the start line in either direction.
         self.distance += (
             progress - self.progress + geometry.total_length / 2
         ) % geometry.total_length - geometry.total_length / 2
-        crossed = self._crossed_finish_line(position)
+        crossed = self.crossed_finish_line(position)
         self.previous = position
         self.progress = progress
         self.segment = index
         return crossed
 
-    def _crossed_finish_line(self, position):
-        previous_offset = float(
-            np.dot(self.previous - self.origin, self.forward)
-        )
+    def crossed_finish_line(self, position):
+        previous_offset = float(np.dot(self.previous - self.origin, self.forward))
         current_offset = float(np.dot(position - self.origin, self.forward))
         if not (
             previous_offset < 0 <= current_offset

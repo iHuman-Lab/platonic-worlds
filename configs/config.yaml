@@ -1,7 +1,7 @@
-# ---------------------------------------------------------------- Paths
+# Paths ----------------------------------------------------------------
 log_dir: 'tb_logs'
 
-# ----------------------------------------------------------------- Data
+# Data -----------------------------------------------------------------
 games: ['freeway']
 num_actions: 18
 batch_size: 32
@@ -9,10 +9,31 @@ size_x: 84
 size_y: 84
 grey_scale: True
 
-# ------------------------------------------------------------- Training
+# Training -------------------------------------------------------------
 epochs: 20
 
-# ------------------------------------------------- Conv JEPA
+# Conv JEPA ------------------------------------------------------------
 conv_jepa_dim: 512 # latent size of the CNN encoder
 conv_jepa_frames: 2 # frames fed to the encoder
 conv_jepa_horizon: 2 # future steps predicted (= number of actions conditioned on)
+
+# Env data collection --------------------------------------------------
+collect:
+  episodes: 5 # number of generated tracks
+  max_steps: 6000 # emergency cap per episode
+  seed: 42 # first track seed, incremented per episode
+  output: 'dataset' # new directory per run; existing datasets are not overwritten
+  collection_mode: 'images' # watch | data | images
+  image_resolution: 'low' # low | middle | high
+  render: False # show the live simulator
+  save_png: False # also export individual PNG frames
+  domain_randomize: False # randomize road/background colors
+  exploration: 0.08 # steering noise strength, 0 to 1
+  max_speed: 48.0 # straight speed target (world units/s)
+  corner_speed: 16.0 # minimum curvature-based speed target
+  abort_spin: False # early cutoff on extreme spin
+
+# Env episode replay ---------------------------------------------------
+preview:
+  episode: 'dataset/episode_00000' # episode folder or trajectory.npz
+  fps: 50 # playback frame rate (50 = real time)
