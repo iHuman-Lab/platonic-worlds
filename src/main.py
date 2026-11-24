@@ -11,7 +11,9 @@ from env.episode_data import build_dataset_info
 from env.preview_episode import load_episode, play_episode
 from env.race_env import FinishLineCarRacing
 from trainers.conv_jepa import train_conv_jepa
-from trainers.dynamics_trainer import format_results, run_dynamics_experiment
+from trainers.dynamics_trainer import format_results, run_dynamics_experiment, train_final_dynamics
+from trainers.encoder_trainer import run_encoder_training
+from trainers.transfer_eval import format_transfer, run_transfer_experiment
 from utils import skip_run
 
 # The configuration file
@@ -74,6 +76,20 @@ with skip_run("skip", "train_conv_jepa") as check, check():
 with skip_run("skip", "constraint_dynamics") as check, check():
     results = run_dynamics_experiment(config)
     print(format_results(results))
+
+
+with skip_run("skip", "train_transfer_variants") as check, check():
+    for variant, variant_cfg in config["transfer"]["variants"].items():
+        if not variant_cfg["active"]:
+            continue
+        if variant_cfg["train_dynamics"]:
+            train_final_dynamics(config, variant)
+        run_encoder_training(config, variant)
+
+
+with skip_run("skip", "frozen_dynamics_transfer") as check, check():
+    results = run_transfer_experiment(config)
+    print(format_transfer(results))
 
 
 with skip_run("skip", "preview_env_episode") as check, check():

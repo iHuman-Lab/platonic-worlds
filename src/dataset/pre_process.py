@@ -79,6 +79,29 @@ def build_preprocessor(config: dict) -> ComposePreprocessor:
     return ComposePreprocessor([STEP_BUILDERS[name](cfg) for name in cfg["preprocess"]])
 
 
+def augment_images(images: torch.Tensor, cfg: dict) -> torch.Tensor:
+    """Brightness, contrast, noise and a small translation of [B, T, S, S] frames in [0, 1].
+
+    Each window gets one random draw, applied to all its frames, so the motion between
+    frames is untouched. There are deliberately no flips: they would reverse the sign of
+    heading error, sideslip and lateral offset.
+    """
+    batch, _, height, width = images.shape
+
+    def uniform(limit: float, centre: float = 0.0) -> torch.Tensor:
+        return torch.empty(batch, 1, 1, 1, device=images.device).uniform_(centre - limit, centre + limit)
+
+    mean = images.mean(dim=(1, 2, 3), keepdim=True)
+    images = (images - mean) * uniform(cfg["contrast"], 1.0) + mean + uniform(cfg["brightness"])
+    images = images + cfg["noise_std"] * torch.randn_like(images)
+    theta = torch.zeros(batch, 2, 3, device=images.device)
+    theta[:, 0, 0] = theta[:, 1, 1] = 1.0
+    theta[:, 0, 2] = uniform(cfg["max_shift"]).view(batch) * 2 / width
+    theta[:, 1, 2] = uniform(cfg["max_shift"]).view(batch) * 2 / height
+    grid = F.affine_grid(theta, list(images.shape), align_corners=False)
+    return F.grid_sample(images, grid, padding_mode="border", align_corners=False).clamp(0.0, 1.0)
+
+
 def sliding_windows(
     samples: Iterator[dict], window: int, stride: int, skip_intro: int
 ) -> Iterator[list[dict]]:

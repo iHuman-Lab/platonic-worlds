@@ -57,24 +57,36 @@ def train_dynamics(
 
 
 @torch.no_grad()
-def predict_margins(
-    model: ConstraintDynamics, name: str, window: dict, config: dict, actions: torch.Tensor
+def rollout_margins(
+    model: ConstraintDynamics, name: str, c0: torch.Tensor, actions: torch.Tensor, config: dict
 ) -> torch.Tensor:
-    """Roll out from the true first frame; return margins (N, K + 1, C), frame 0 is true."""
-    rep = represent(name, window, config).to(actions.device)
-    pred = model.denormalize(model.rollout(model.normalize(rep[:, 0]), actions))
-    return to_margins(name, torch.cat([rep[:, :1], pred], dim=1), config)
+    """Roll out from the normalized start c0; margins (N, K + 1, C), frame 0 is the start."""
+    pred = model.denormalize(model.rollout(c0, actions))
+    trajectory = torch.cat([model.denormalize(c0).unsqueeze(1), pred], dim=1)
+    return to_margins(name, trajectory, config)
 
 
 def window_errors(
-    model: ConstraintDynamics, name: str, window: dict, config: dict, specs: SpecSet
+    model: ConstraintDynamics,
+    name: str,
+    window: dict,
+    config: dict,
+    specs: SpecSet,
+    start: int = 0,
+    c0: torch.Tensor | None = None,
 ) -> dict[str, torch.Tensor]:
-    """Per-window squared margin errors and exact spec robustness, predicted and true."""
+    """Per-window squared margin errors and exact spec robustness, predicted and true.
+
+    The rollout starts at frame `start` from the true representation, or from c0 (already
+    normalized, e.g. an encoder's estimate) when given, and uses the actions from `start` on.
+    """
     device = model.mean.device
-    actions = window["actions"].to(device)
-    true = constraint_margins(window["states"], window["extras"], config).to(device)
-    pred = predict_margins(model, name, window, config, actions)
-    shuffled = predict_margins(model, name, window, config, actions.roll(1, dims=0))
+    actions = window["actions"][:, start:].to(device)
+    true = constraint_margins(window["states"], window["extras"], config)[:, start:].to(device)
+    if c0 is None:
+        c0 = model.normalize(represent(name, window, config)[:, start].to(device))
+    pred = rollout_margins(model, name, c0, actions, config)
+    shuffled = rollout_margins(model, name, c0, actions.roll(1, dims=0), config)
     return {
         "squared": ((pred - true)[:, 1:] ** 2).cpu(),
         "persistence": ((true[:, :1] - true)[:, 1:] ** 2).cpu(),
@@ -143,6 +155,42 @@ def run_dynamics_experiment(config: dict) -> dict:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(results, indent=2))
     return results
+
+
+def save_dynamics(model: ConstraintDynamics, meta: dict, path: str) -> None:
+    """Save the weights (including the normalization buffers) and how they were trained."""
+    out = Path(path)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    action_dim = model.net[0].in_features - model.mean.shape[0]
+    hidden = model.net[0].out_features
+    torch.save({"state_dict": model.state_dict(), "action_dim": action_dim, "hidden": hidden, **meta}, out)
+
+
+def load_dynamics(path: str, device: str) -> tuple[ConstraintDynamics, dict]:
+    """Rebuild a saved dynamics model; returns the model and the saved metadata."""
+    saved = torch.load(path, map_location=device, weights_only=False)
+    dim = saved["state_dict"]["mean"].shape[0]
+    model = ConstraintDynamics(torch.zeros(dim), torch.ones(dim), saved["action_dim"], saved["hidden"])
+    model.load_state_dict(saved["state_dict"])
+    return model.to(device).eval(), saved
+
+
+def train_final_dynamics(config: dict, variant: str) -> dict:
+    """Train the dynamics for one transfer variant, save it, and score it on validation."""
+    cfg, variant_cfg = config["dynamics"], config["transfer"]["variants"][variant]
+    windows = load_state_windows(config, cfg["horizon"] + 1)
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    name, rollout, seed = variant_cfg["representation"], cfg["final_train_rollout"], cfg["final_seed"]
+    model = train_dynamics(name, windows["train"], config, rollout, seed, device)
+    meta = {"representation": name, "train_rollout": rollout, "seed": seed}
+    save_dynamics(model, meta, variant_cfg["dynamics_checkpoint"])
+    specs, val = SpecSet(config), windows["val"]
+    errors = window_errors(model, name, val, config, specs)
+    babble = (val["modes"] == MODE_BABBLE).any(dim=1)
+    masks = {"all": torch.ones_like(babble), "babble": babble}
+    summary = {s: summarize(errors, m, specs, config) for s, m in masks.items()}
+    Path(variant_cfg["dynamics_results"]).write_text(json.dumps(summary, indent=2))
+    return summary
 
 
 def format_results(results: dict) -> str:

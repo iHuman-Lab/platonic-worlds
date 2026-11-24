@@ -27,7 +27,7 @@ conv_jepa_ema: 0.99 # EMA decay of the target encoder
 conv_jepa_reg: 1.0 # weight of the variance hinge (anti-collapse)
 conv_jepa_constraint_weight: 1.0 # weight of the constraint regression loss
 conv_jepa_constraint_hidden: 128 # hidden size of the constraint head
-conv_jepa_stl_weight: 1.0 # weight of the STL robustness loss (0 switches it off)
+conv_jepa_stl_weight: 5.0 # weight of the STL robustness loss (0 switches it off)
 conv_jepa_violation_weight: 10.0 # extra weight on squared error where the true margin is below 0 (violations are rare)
 conv_jepa_constraint_to_encoder: True # False: head only probes (gradient detached from the encoder)
 log_every_n_steps: 10
@@ -95,6 +95,7 @@ stl:
 dynamics:
   horizon: 8 # rollout steps evaluated (window = horizon + 1 frames)
   representations: [margins, augmented, augmented_preview, raw_state]
+  ego_states: [omega, e_y, e_theta, d_left, d_right, kappa, speed, beta] # 'ego_state': the car-centered state a camera can observe
   augment_states: [e_y, omega, kappa, speed, e_theta, beta] # added to the margins in 'augmented'; the signed e_theta and beta matter most (margins use their abs)
   train_rollouts: [1, 8] # autoregressive steps used in the training loss
   seeds: [1, 2, 3]
@@ -105,6 +106,212 @@ dynamics:
   weight_decay: 1.0e-4
   std_floor: 1.0e-6 # added to the normalization std so constant dimensions stay finite
   results_file: 'results/dynamics_results.json'
+  final_train_rollout: 8 # training of the dynamics saved for the transfer variants
+  final_seed: 1
+
+# Camera encoder -> constraint-space vector (Stage 4) ------------------
+encoder:
+  dim: 512 # width of the conv trunk's latent
+  batch_size: 64
+  lr: 3.0e-4
+  weight_decay: 1.0e-4
+  log_every: 200 # steps between logged mean training losses
+  augmentation: # applied per training window, the same to all of its frames; no flips
+    brightness: 0.1 # additive, uniform in +/- this
+    contrast: 0.2 # multiplicative around the window mean, uniform in 1 +/- this
+    noise_std: 0.02 # gaussian pixel noise (images are in [0, 1])
+    max_shift: 2.0 # translation in pixels, uniform in +/- this (both axes)
+
+# Frozen-dynamics transfer (Stage 5) -----------------------------------
+# Each variant: a dynamics model trained on `representation`, and a camera encoder trained
+# to output that representation. constraint_space is the proposal; raw_state is the
+# conventional state-estimation baseline.
+transfer:
+  results_file: 'results/transfer_results.json'
+  variants:
+    constraint_space:
+      representation: augmented
+      dynamics_checkpoint: 'checkpoints/constraint_space_dynamics.pt'
+      dynamics_results: 'results/constraint_space_dynamics.json'
+      encoder_checkpoint: 'checkpoints/constraint_space_encoder.pt'
+      encoder_results: 'results/constraint_space_encoder.json'
+      train_dynamics: True
+      active: False # False: skipped by training and transfer evaluation (checkpoint removed)
+      frames: 2 # stacked frames the encoder sees; the target is the representation at the last one
+      max_steps: 6000
+      alignment_weight: 1.0
+      rollout_weight: 0.0
+      seed: 0
+      grad_clip: 0.0 # max gradient norm; 0 = no clipping
+      lr_schedule: constant # constant | cosine (decay to 0 after warmup)
+      warmup_steps: 0
+      arch: small # small (Atari-style CNN) | resnet
+      pool: flatten # resnet only: global (average) | flatten
+      augment: False # image augmentation of the training batches (encoder.augmentation)
+    constraint_space_rollout: # same frozen dynamics; the encoder also learns from the rollout error
+      representation: augmented
+      dynamics_checkpoint: 'checkpoints/constraint_space_dynamics.pt'
+      encoder_checkpoint: 'checkpoints/constraint_space_rollout_encoder.pt'
+      encoder_results: 'results/constraint_space_rollout_encoder.json'
+      train_dynamics: False
+      active: False # False: skipped by training and transfer evaluation (checkpoint removed)
+      frames: 2 # stacked frames the encoder sees; the target is the representation at the last one
+      max_steps: 6000
+      alignment_weight: 1.0
+      rollout_weight: 1.0
+      seed: 0
+      grad_clip: 0.0 # max gradient norm; 0 = no clipping
+      lr_schedule: constant # constant | cosine (decay to 0 after warmup)
+      warmup_steps: 0
+      arch: small # small (Atari-style CNN) | resnet
+      pool: flatten # resnet only: global (average) | flatten
+      augment: False # image augmentation of the training batches (encoder.augmentation)
+    ego_state:
+      representation: ego_state
+      dynamics_checkpoint: 'checkpoints/ego_state_dynamics.pt'
+      dynamics_results: 'results/ego_state_dynamics.json'
+      encoder_checkpoint: 'checkpoints/ego_state_encoder.pt'
+      encoder_results: 'results/ego_state_encoder.json'
+      train_dynamics: True
+      active: False # False: skipped by training and transfer evaluation (checkpoint removed)
+      frames: 2 # stacked frames the encoder sees; the target is the representation at the last one
+      max_steps: 6000
+      alignment_weight: 1.0
+      rollout_weight: 0.0
+      seed: 0
+      grad_clip: 0.0 # max gradient norm; 0 = no clipping
+      lr_schedule: constant # constant | cosine (decay to 0 after warmup)
+      warmup_steps: 0
+      arch: small # small (Atari-style CNN) | resnet
+      pool: flatten # resnet only: global (average) | flatten
+      augment: False # image augmentation of the training batches (encoder.augmentation)
+    ego_state_rollout:
+      representation: ego_state
+      dynamics_checkpoint: 'checkpoints/ego_state_dynamics.pt'
+      encoder_checkpoint: 'checkpoints/ego_state_rollout_encoder.pt'
+      encoder_results: 'results/ego_state_rollout_encoder.json'
+      train_dynamics: False
+      active: False # False: skipped by training and transfer evaluation (checkpoint removed)
+      frames: 2 # stacked frames the encoder sees; the target is the representation at the last one
+      max_steps: 6000
+      alignment_weight: 1.0
+      rollout_weight: 1.0
+      seed: 0
+      grad_clip: 0.0 # max gradient norm; 0 = no clipping
+      lr_schedule: constant # constant | cosine (decay to 0 after warmup)
+      warmup_steps: 0
+      arch: small # small (Atari-style CNN) | resnet
+      pool: flatten # resnet only: global (average) | flatten
+      augment: False # image augmentation of the training batches (encoder.augmentation)
+    raw_state:
+      representation: raw_state
+      dynamics_checkpoint: 'checkpoints/raw_state_dynamics.pt'
+      dynamics_results: 'results/raw_state_dynamics.json'
+      encoder_checkpoint: 'checkpoints/raw_state_encoder.pt'
+      encoder_results: 'results/raw_state_encoder.json'
+      train_dynamics: True
+      active: False # False: skipped by training and transfer evaluation (checkpoint removed)
+      frames: 2 # stacked frames the encoder sees; the target is the representation at the last one
+      max_steps: 6000
+      alignment_weight: 1.0
+      rollout_weight: 0.0
+      seed: 0
+      grad_clip: 0.0 # max gradient norm; 0 = no clipping
+      lr_schedule: constant # constant | cosine (decay to 0 after warmup)
+      warmup_steps: 0
+      arch: small # small (Atari-style CNN) | resnet
+      pool: flatten # resnet only: global (average) | flatten
+      augment: False # image augmentation of the training batches (encoder.augmentation)
+    constraint_space_f4: # option 2: more context frames
+      representation: augmented
+      dynamics_checkpoint: 'checkpoints/constraint_space_dynamics.pt'
+      encoder_checkpoint: 'checkpoints/constraint_space_f4_encoder.pt'
+      encoder_results: 'results/constraint_space_f4_encoder.json'
+      train_dynamics: False
+      active: False # False: skipped by training and transfer evaluation (checkpoint removed)
+      frames: 4
+      max_steps: 6000
+      alignment_weight: 1.0
+      rollout_weight: 0.0
+      seed: 0
+      grad_clip: 0.0 # max gradient norm; 0 = no clipping
+      lr_schedule: constant # constant | cosine (decay to 0 after warmup)
+      warmup_steps: 0
+      arch: small # small (Atari-style CNN) | resnet
+      pool: flatten # resnet only: global (average) | flatten
+      augment: False # image augmentation of the training batches (encoder.augmentation)
+    constraint_space_long: # option 2: longer training
+      representation: augmented
+      dynamics_checkpoint: 'checkpoints/constraint_space_dynamics.pt'
+      encoder_checkpoint: 'checkpoints/constraint_space_long_encoder.pt'
+      encoder_results: 'results/constraint_space_long_encoder.json'
+      train_dynamics: False
+      active: False # False: skipped by training and transfer evaluation (checkpoint removed)
+      frames: 2
+      max_steps: 20000
+      alignment_weight: 1.0
+      rollout_weight: 0.0
+      seed: 0
+      grad_clip: 0.0 # max gradient norm; 0 = no clipping
+      lr_schedule: constant # constant | cosine (decay to 0 after warmup)
+      warmup_steps: 0
+      arch: small # small (Atari-style CNN) | resnet
+      pool: flatten # resnet only: global (average) | flatten
+      augment: False # image augmentation of the training batches (encoder.augmentation)
+    constraint_space_f4_long: # option 2: both
+      representation: augmented
+      dynamics_checkpoint: 'checkpoints/constraint_space_dynamics.pt'
+      encoder_checkpoint: 'checkpoints/constraint_space_f4_long_encoder.pt'
+      encoder_results: 'results/constraint_space_f4_long_encoder.json'
+      train_dynamics: False
+      active: False # False: skipped by training and transfer evaluation (checkpoint removed)
+      frames: 4
+      max_steps: 20000
+      alignment_weight: 1.0
+      rollout_weight: 0.0
+      seed: 0
+      grad_clip: 0.0 # max gradient norm; 0 = no clipping
+      lr_schedule: constant # constant | cosine (decay to 0 after warmup)
+      warmup_steps: 0
+      arch: small # small (Atari-style CNN) | resnet
+      pool: flatten # resnet only: global (average) | flatten
+      augment: False # image augmentation of the training batches (encoder.augmentation)
+    constraint_space_stable: # option 2A: clipping + warmup + cosine decay (seed 1 of the 3-seed comparison)
+      representation: augmented
+      dynamics_checkpoint: 'checkpoints/constraint_space_dynamics.pt'
+      encoder_checkpoint: 'checkpoints/constraint_space_stable_encoder.pt'
+      encoder_results: 'results/constraint_space_stable_encoder.json'
+      train_dynamics: False
+      active: False # False: skipped by training and transfer evaluation (checkpoint removed)
+      frames: 2
+      max_steps: 20000
+      alignment_weight: 1.0
+      rollout_weight: 0.0
+      seed: 1
+      grad_clip: 1.0
+      lr_schedule: cosine
+      warmup_steps: 500
+      arch: small # small (Atari-style CNN) | resnet
+      pool: flatten # resnet only: global (average) | flatten
+      augment: False # image augmentation of the training batches (encoder.augmentation)
+    constraint_space_resnet: # option 2B: residual CNN, global pooling (seed 1 of the 3-seed comparison)
+      representation: augmented
+      dynamics_checkpoint: 'checkpoints/constraint_space_dynamics.pt'
+      encoder_checkpoint: 'checkpoints/constraint_space_resnet_encoder.pt'
+      encoder_results: 'results/constraint_space_resnet_encoder.json'
+      train_dynamics: False
+      active: True # False: skipped by training and transfer evaluation (checkpoint removed)
+      frames: 2
+      max_steps: 20000
+      alignment_weight: 1.0
+      rollout_weight: 0.0
+      seed: 1
+      grad_clip: 1.0
+      lr_schedule: cosine
+      warmup_steps: 500
+      arch: resnet
+      pool: global
+      augment: False # image augmentation of the training batches (encoder.augmentation)
 
 # Env episode replay ---------------------------------------------------
 preview:

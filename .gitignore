@@ -129,3 +129,6 @@ videos/
 
 # Collected CarRacing episodes
 /dataset/
+
+# Trained model checkpoints
+/checkpoints/
