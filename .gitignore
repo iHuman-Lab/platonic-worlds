@@ -2,6 +2,7 @@
 __pycache__/
 *.py[cod]
 *$py.class
+*.DS_Store
 
 # Config
 config.yml
@@ -11,7 +12,7 @@ config.yml
 
 # Distribution / packaging
 .Python
-env/
+/env/
 build/
 develop-eggs/
 dist/
