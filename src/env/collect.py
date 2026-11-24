@@ -46,6 +46,9 @@ def collect_episode(environment, args, episode_id, output_dir):
         safe_exploration=args.safe_exploration,
         boundary_recovery=args.boundary_recovery,
         speed_scale=args.speed_scale,
+        babble_prob=args.babble_prob,
+        babble_steps=args.babble_steps,
+        babble_amp=args.babble_amp,
     )
     state, road, extras = extract_state(environment, geometry)
     recording = EpisodeData(states=[state], extras=[extras])

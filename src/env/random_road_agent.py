@@ -16,7 +16,8 @@ from env.road_geometry import RoadContext, TrackGeometry, wrap_angle
 MODE_NORMAL = 0
 MODE_RECOVERY = 1
 MODE_SPIN_PREVENTION = 2
-MODE_NAMES = ("normal", "boundary_recovery", "spin_prevention")
+MODE_BABBLE = 3
+MODE_NAMES = ("normal", "boundary_recovery", "spin_prevention", "babble")
 
 
 class RandomRoadAgent:
@@ -32,6 +33,9 @@ class RandomRoadAgent:
         safe_exploration: bool = True,
         boundary_recovery: bool = True,
         speed_scale: tuple[float, float] = (0.96, 1.0),
+        babble_prob: float = 0.0,
+        babble_steps: tuple[int, int] = (5, 20),
+        babble_amp: float = 1.0,
     ):
         self.geometry = geometry
         self.rng = rng
@@ -42,6 +46,11 @@ class RandomRoadAgent:
         self.corner_speed = float(corner_speed)
         self.safe_exploration = bool(safe_exploration)
         self.boundary_recovery = bool(boundary_recovery)
+        self.babble_prob = float(babble_prob)
+        self.babble_steps = babble_steps
+        self.babble_amp = float(babble_amp)
+        self.babble_left = 0
+        self.babble_action = np.zeros(3, dtype=np.float32)
 
     def act(self, state: np.ndarray, road: RoadContext) -> tuple[np.ndarray, int, dict]:
         yaw_rate = state[5]
@@ -70,6 +79,7 @@ class RandomRoadAgent:
             ],
             dtype=np.float32,
         )
+        action, mode = self.apply_babble(action, mode)
         diagnostics = {
             "target_speed": desired_speed,
             "target_heading_error": heading_to_target_error,
@@ -77,6 +87,26 @@ class RandomRoadAgent:
             "steering_noise": noise,
         }
         return action, mode, diagnostics
+
+    def apply_babble(self, action: np.ndarray, mode: int) -> tuple[np.ndarray, int]:
+        """Sometimes hold a random command for a few steps, whatever the road looks like."""
+        if self.babble_left == 0 and self.babble_prob > 0 and self.rng.random() < self.babble_prob:
+            low, high = self.babble_steps
+            self.babble_left = int(self.rng.integers(low, high + 1))
+            self.babble_action = self.sample_babble_action()
+        if self.babble_left == 0:
+            return action, mode
+        self.babble_left -= 1
+        return self.babble_action.copy(), MODE_BABBLE
+
+    def sample_babble_action(self) -> np.ndarray:
+        """Random steering, and either some gas or some brake."""
+        steering = self.rng.uniform(-self.babble_amp, self.babble_amp)
+        if self.rng.random() < 0.5:
+            gas, brake = self.rng.uniform(0.0, 1.0), 0.0
+        else:
+            gas, brake = 0.0, self.rng.uniform(0.0, 0.6)
+        return np.array([steering, gas, brake], dtype=np.float32)
 
     def apply_safety_controls(self, state, target_heading_error, steering, gas, brake):
         """Apply boundary recovery before the higher-priority spin controls."""

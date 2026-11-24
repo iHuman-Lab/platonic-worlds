@@ -185,6 +185,9 @@ def build_dataset_info(args):
         "requested_episodes": args.episodes,
         "max_steps_per_episode": args.max_steps,
         "exploration": args.exploration,
+        "babble_prob": args.babble_prob,
+        "babble_steps": list(args.babble_steps),
+        "babble_amp": args.babble_amp,
         "completion_rule": (
             "forward start-line crossing after at least 95% net track progress"
         ),

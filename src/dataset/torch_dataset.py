@@ -10,9 +10,12 @@ import numpy as np
 import webdataset as wds
 from torch.utils.data import DataLoader
 
+import torch
+
 from dataset.pre_process import (
     build_preprocessor,
     sliding_windows,
+    window_to_state_tensors,
     window_to_tensors,
 )
 
@@ -69,14 +72,29 @@ def write_split(split: dict[str, list[dict]], path: str) -> None:
         json.dump(split, split_file, indent=2)
 
 
-def create_dataloader(files: list[str], config: dict, train: bool) -> DataLoader:
-    """Build a DataLoader of windows; shuffles shards and windows when training."""
+def skip_png(key: str, data: bytes) -> bytes | None:
+    """wds decoder that leaves PNG frames undecoded (state-only loading)."""
+    return b"" if key.endswith("png") else None
+
+
+def create_dataloader(
+    files: list[str], config: dict, train: bool, images: bool = True
+) -> DataLoader:
+    """Build a DataLoader of windows; shuffles shards and windows when training.
+
+    images=False skips decoding the frames and returns only states, extras, actions.
+    """
     cfg = config["dataset"]
+    decoders = ("rgb8",) if images else (skip_png, "rgb8")
+    if images:
+        make_tensors = partial(window_to_tensors, preprocessor=build_preprocessor(config))
+    else:
+        make_tensors = window_to_state_tensors
     pipeline = wds.WebDataset(
         files,
         shardshuffle=100 if train else False,
         empty_check=False,
-    ).decode("rgb8")
+    ).decode(*decoders)
     pipeline = pipeline.compose(
         partial(
             sliding_windows,
@@ -84,7 +102,7 @@ def create_dataloader(files: list[str], config: dict, train: bool) -> DataLoader
             stride=cfg["stride"],
             skip_intro=cfg["skip_intro"],
         )
-    ).map(partial(window_to_tensors, preprocessor=build_preprocessor(config)))
+    ).map(make_tensors)
     if train:
         pipeline = pipeline.shuffle(cfg["shuffle_buffer"])
     return DataLoader(
@@ -101,3 +119,15 @@ def get_car_racing_dataloaders(config: dict) -> dict[str, DataLoader]:
         name: create_dataloader([e["path"] for e in episodes], config, name == "train")
         for name, episodes in split.items()
     }
+
+
+def load_state_windows(config: dict, window_length: int) -> dict[str, dict[str, torch.Tensor]]:
+    """Load every train/val window (no images) into memory as stacked tensors."""
+    sized = {**config, "dataset": {**config["dataset"], "window_length": window_length}}
+    split = split_episodes(list_episodes(config["dataset"]["root"]), config)
+    windows = {}
+    for name in ("train", "val"):
+        loader = create_dataloader([e["path"] for e in split[name]], sized, False, images=False)
+        batches = list(loader)
+        windows[name] = {key: torch.cat([b[key] for b in batches]) for key in batches[0]}
+    return windows

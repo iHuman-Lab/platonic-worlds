@@ -18,7 +18,7 @@ epochs: 20
 # Conv JEPA ------------------------------------------------------------
 conv_jepa_dim: 512 # latent size of the CNN encoder
 conv_jepa_frames: 2 # frames fed to the encoder
-conv_jepa_horizon: 2 # future steps predicted (= number of actions conditioned on)
+conv_jepa_horizon: 8 # future steps rolled out (= actions conditioned on), 8 steps ~ 0.5 s
 conv_jepa_action_dim: 3 # steer, gas, brake
 conv_jepa_act_embed: 32 # size of the action embedding
 conv_jepa_lr: 3.0e-4
@@ -27,6 +27,7 @@ conv_jepa_ema: 0.99 # EMA decay of the target encoder
 conv_jepa_reg: 1.0 # weight of the variance hinge (anti-collapse)
 conv_jepa_constraint_weight: 1.0 # weight of the constraint regression loss
 conv_jepa_constraint_hidden: 128 # hidden size of the constraint head
+conv_jepa_stl_weight: 1.0 # weight of the STL robustness loss (0 switches it off)
 conv_jepa_violation_weight: 10.0 # extra weight on squared error where the true margin is below 0 (violations are rare)
 conv_jepa_constraint_to_encoder: True # False: head only probes (gradient detached from the encoder)
 log_every_n_steps: 10
@@ -48,6 +49,9 @@ collect:
   safe_exploration: True # False: steering noise stays at full strength near the road edge
   boundary_recovery: True # False: no edge-recovery override, so the car can leave the road
   speed_scale: [0.96, 1.0] # per-episode speed factor range [low, high]; above 1 overshoots corners
+  babble_prob: 0.0 # chance per decision to start a random-action burst (0 = off); makes actions independent of the scene
+  babble_steps: [5, 20] # burst length range, in recorded steps
+  babble_amp: 1.0 # max |steering| in a burst
   abort_spin: False # early cutoff on extreme spin
 
 # CarRacing episode windows --------------------------------------------
@@ -56,7 +60,7 @@ dataset:
   split_file: 'dataset/split.json' # which seeds went to train/val/test
   val_per_run: 3 # held-out seeds per run for validation
   test_per_run: 2 # held-out seeds per run for testing
-  window_length: 4 # frames per sample; ConvJEPA needs conv_jepa_frames + conv_jepa_horizon
+  window_length: 10 # frames per sample; ConvJEPA needs conv_jepa_frames + conv_jepa_horizon
   stride: 1 # recorded steps between window starts
   skip_intro: 20 # drop the zoom-in intro frames
   preprocess: ['crop_hud', 'grayscale', 'resize'] # ordered image steps: crop_hud | grayscale | resize (ConvJEPA needs grayscale)
@@ -86,6 +90,21 @@ stl:
     obey_speed_limit: {always: {pred: speed_limit}}
     stay_aligned: {always: {pred: heading_error}}
     recover_to_road: {always: {implies: [{not: {pred: road_clearance}}, {eventually: {pred: road_clearance}}]}}
+
+# Constraint-space dynamics experiment (state only, no images) ---------
+dynamics:
+  horizon: 8 # rollout steps evaluated (window = horizon + 1 frames)
+  representations: [margins, augmented, augmented_preview, raw_state]
+  augment_states: [e_y, omega, kappa, speed, e_theta, beta] # added to the margins in 'augmented'; the signed e_theta and beta matter most (margins use their abs)
+  train_rollouts: [1, 8] # autoregressive steps used in the training loss
+  seeds: [1, 2, 3]
+  hidden: 256
+  epochs: 20
+  batch_size: 512
+  lr: 1.0e-3
+  weight_decay: 1.0e-4
+  std_floor: 1.0e-6 # added to the normalization std so constant dimensions stay finite
+  results_file: 'results/dynamics_results.json'
 
 # Env episode replay ---------------------------------------------------
 preview:

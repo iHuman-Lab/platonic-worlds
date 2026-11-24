@@ -11,6 +11,7 @@ from env.episode_data import build_dataset_info
 from env.preview_episode import load_episode, play_episode
 from env.race_env import FinishLineCarRacing
 from trainers.conv_jepa import train_conv_jepa
+from trainers.dynamics_trainer import format_results, run_dynamics_experiment
 from utils import skip_run
 
 # The configuration file
@@ -68,6 +69,11 @@ with skip_run("skip", "car_racing_dataloaders") as check, check():
 with skip_run("skip", "train_conv_jepa") as check, check():
     data_loaders = get_car_racing_dataloaders(config)
     train_conv_jepa(config, data_loaders)
+
+
+with skip_run("skip", "constraint_dynamics") as check, check():
+    results = run_dynamics_experiment(config)
+    print(format_results(results))
 
 
 with skip_run("skip", "preview_env_episode") as check, check():

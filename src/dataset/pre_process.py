@@ -2,7 +2,7 @@
 
 Each episode is its own tar, so windows never cross episodes. Within a window of
 T frames, actions[i] is the action taken between frame i and frame i + 1, so
-there are T - 1 actions.
+there are T - 1 actions. modes[i] is the controller mode that chose actions[i].
 """
 
 from __future__ import annotations
@@ -98,17 +98,27 @@ def sliding_windows(
             yield frames
 
 
+def window_to_state_tensors(frames: list[dict]) -> dict[str, torch.Tensor]:
+    """Stack one window of states, extras, actions and controller info (no images)."""
+    preview = [f["json"]["preview_curvature_abs"] for f in frames[:-1]]
+    preview.append(preview[-1])  # the final observation has no controller diagnostics
+    return {
+        "states": torch.from_numpy(np.stack([f["state.npy"] for f in frames])).float(),
+        "extras": torch.from_numpy(np.stack([f["extras.npy"] for f in frames])).float(),
+        "actions": torch.from_numpy(
+            np.stack([f["action.npy"] for f in frames[:-1]])
+        ).float(),
+        "modes": torch.tensor([f["json"]["controller_mode"] for f in frames[:-1]]),
+        "preview": torch.tensor(preview).float(),
+    }
+
+
 def window_to_tensors(
     frames: list[dict], preprocessor: ComposePreprocessor
 ) -> dict[str, torch.Tensor]:
     """Stack one window into float tensors, preprocessing the images."""
     images = np.stack([frame["png"] for frame in frames])
     images = torch.from_numpy(images).permute(0, 3, 1, 2).float() / 255.0
-    return {
-        "images": preprocessor(images),
-        "states": torch.from_numpy(np.stack([f["state.npy"] for f in frames])).float(),
-        "extras": torch.from_numpy(np.stack([f["extras.npy"] for f in frames])).float(),
-        "actions": torch.from_numpy(
-            np.stack([f["action.npy"] for f in frames[:-1]])
-        ).float(),
-    }
+    tensors = window_to_state_tensors(frames)
+    tensors["images"] = preprocessor(images)
+    return tensors
