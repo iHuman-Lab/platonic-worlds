@@ -3,8 +3,6 @@ import os
 from pathlib import Path
 from types import SimpleNamespace
 
-import yaml
-
 from dataset.torch_dataset import get_car_racing_dataloaders
 from env.collect import collect_episode
 from env.episode_data import build_dataset_info
@@ -13,16 +11,15 @@ from env.race_env import FinishLineCarRacing
 from trainers.conv_jepa import train_conv_jepa
 from trainers.dynamics_trainer import format_results, run_dynamics_experiment, train_final_dynamics
 from trainers.encoder_trainer import run_encoder_training
-from trainers.transfer_eval import format_transfer, run_transfer_experiment
-from utils import skip_run
+from trainers.transfer_eval import format_adaptation, format_transfer, run_adaptation_experiment, run_transfer_experiment
+from utils import load_config, skip_run
 
-# The configuration file
-config_path = "configs/config.yaml"
-config = yaml.load(open(str(config_path)), Loader=yaml.SafeLoader)
-
+# The configuration: every YAML file in configs/ merged into one dict
+config = load_config("configs")
 
 
-with skip_run("run", "collect_env_data") as check, check():
+
+with skip_run("skip", "collect_env_data") as check, check():
     # Options live in the `collect` block of configs/config.yaml
     args = SimpleNamespace(**config["collect"])
     args.render = args.render or args.collection_mode == "watch"
@@ -90,6 +87,11 @@ with skip_run("skip", "train_transfer_variants") as check, check():
 with skip_run("skip", "frozen_dynamics_transfer") as check, check():
     results = run_transfer_experiment(config)
     print(format_transfer(results))
+
+
+with skip_run("skip", "domain_adaptation") as check, check():
+    results = run_adaptation_experiment(config)
+    print(format_adaptation(results))
 
 
 with skip_run("skip", "preview_env_episode") as check, check():

@@ -38,7 +38,7 @@ def encoder_loaders(config: dict, variant: str) -> dict[str, DataLoader]:
         "window_length": variant_cfg["frames"] + horizon,
         "batch_size": config["encoder"]["batch_size"],
     }
-    split = split_episodes(list_episodes(config["dataset"]["root"]), config)
+    split = split_episodes(list_episodes(variant_cfg["dataset_root"]), config)
     return {
         name: create_dataloader([e["path"] for e in split[name]], {**config, "dataset": dataset}, name == "train")
         for name in ("train", "val")

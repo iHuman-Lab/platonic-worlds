@@ -137,7 +137,7 @@ class ConvJEPA(pl.LightningModule):
         tgt = self.encode_targets(futures)
         rolled = self.rollout(z, taken)
         jepa_steps = (rolled - tgt).abs().mean(dim=(0, 2))  # L1 per rollout step
-        between = z.std(dim=0)
+        between = z.std(dim=0, correction=0)  # correction=0: a last batch of one sample gives 0, not NaN
         reg = F.relu(1.0 - between).mean()
         with torch.no_grad():
             # Do the actions matter? Rolling out with another sample's actions should hurt.
@@ -212,3 +212,4 @@ def train_conv_jepa(config: dict, loaders: dict) -> None:
         log_every_n_steps=config["log_every_n_steps"],
     )
     trainer.fit(ConvJEPA(config), loaders["train"], loaders["val"])
+    trainer.save_checkpoint(config["conv_jepa_checkpoint"])

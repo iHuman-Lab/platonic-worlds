@@ -1,0 +1,228 @@
+# Frozen-dynamics transfer (Stage 5) -----------------------------------
+# Each variant: a dynamics model trained on `representation`, and a camera encoder trained
+# to output that representation. constraint_space is the proposal; raw_state is the
+# conventional state-estimation baseline.
+transfer:
+  results_file: 'results/transfer_results.json'
+  adaptation: # Stage 6: does an encoder retrained on randomized colours work with the same frozen dynamics?
+    variants: [constraint_space_resnet, constraint_space_resnet_randomized] # original, then randomized-trained
+    shift_root: 'dataset_shift' # evaluation-only runs, never trained on
+    standard_run: 'standard' # run under shift_root with the normal palette
+    randomized_run: 'randomized' # run under shift_root with randomized palettes
+    train_root: 'dataset_randomized' # the randomized training set; its val and test seeds are also held out
+    contrast_bins: [10, 20] # road-grass luminance gap (0-255) group edges
+    results_file: 'results/adaptation_results.json'
+  include_conv_jepa: True # score the saved ConvJEPA (conv_jepa_checkpoint) in the same table
+  variants:
+    constraint_space:
+      representation: augmented
+      dynamics_checkpoint: 'checkpoints/constraint_space_dynamics.pt'
+      dynamics_results: 'results/constraint_space_dynamics.json'
+      encoder_checkpoint: 'checkpoints/constraint_space_encoder.pt'
+      encoder_results: 'results/constraint_space_encoder.json'
+      train_dynamics: True
+      dataset_root: 'dataset' # folder of run subfolders the encoder trains and validates on
+      active: False # False: skipped by training and transfer evaluation (checkpoint removed)
+      frames: 2 # stacked frames the encoder sees; the target is the representation at the last one
+      max_steps: 6000
+      alignment_weight: 1.0
+      rollout_weight: 0.0
+      seed: 0
+      grad_clip: 0.0 # max gradient norm; 0 = no clipping
+      lr_schedule: constant # constant | cosine (decay to 0 after warmup)
+      warmup_steps: 0
+      arch: small # small (Atari-style CNN) | resnet
+      pool: flatten # resnet only: global (average) | flatten
+      augment: False # image augmentation of the training batches (encoder.augmentation)
+    constraint_space_rollout: # same frozen dynamics; the encoder also learns from the rollout error
+      representation: augmented
+      dynamics_checkpoint: 'checkpoints/constraint_space_dynamics.pt'
+      encoder_checkpoint: 'checkpoints/constraint_space_rollout_encoder.pt'
+      encoder_results: 'results/constraint_space_rollout_encoder.json'
+      train_dynamics: False
+      dataset_root: 'dataset' # folder of run subfolders the encoder trains and validates on
+      active: False # False: skipped by training and transfer evaluation (checkpoint removed)
+      frames: 2 # stacked frames the encoder sees; the target is the representation at the last one
+      max_steps: 6000
+      alignment_weight: 1.0
+      rollout_weight: 1.0
+      seed: 0
+      grad_clip: 0.0 # max gradient norm; 0 = no clipping
+      lr_schedule: constant # constant | cosine (decay to 0 after warmup)
+      warmup_steps: 0
+      arch: small # small (Atari-style CNN) | resnet
+      pool: flatten # resnet only: global (average) | flatten
+      augment: False # image augmentation of the training batches (encoder.augmentation)
+    ego_state:
+      representation: ego_state
+      dynamics_checkpoint: 'checkpoints/ego_state_dynamics.pt'
+      dynamics_results: 'results/ego_state_dynamics.json'
+      encoder_checkpoint: 'checkpoints/ego_state_encoder.pt'
+      encoder_results: 'results/ego_state_encoder.json'
+      train_dynamics: True
+      dataset_root: 'dataset' # folder of run subfolders the encoder trains and validates on
+      active: False # False: skipped by training and transfer evaluation (checkpoint removed)
+      frames: 2 # stacked frames the encoder sees; the target is the representation at the last one
+      max_steps: 6000
+      alignment_weight: 1.0
+      rollout_weight: 0.0
+      seed: 0
+      grad_clip: 0.0 # max gradient norm; 0 = no clipping
+      lr_schedule: constant # constant | cosine (decay to 0 after warmup)
+      warmup_steps: 0
+      arch: small # small (Atari-style CNN) | resnet
+      pool: flatten # resnet only: global (average) | flatten
+      augment: False # image augmentation of the training batches (encoder.augmentation)
+    ego_state_rollout:
+      representation: ego_state
+      dynamics_checkpoint: 'checkpoints/ego_state_dynamics.pt'
+      encoder_checkpoint: 'checkpoints/ego_state_rollout_encoder.pt'
+      encoder_results: 'results/ego_state_rollout_encoder.json'
+      train_dynamics: False
+      dataset_root: 'dataset' # folder of run subfolders the encoder trains and validates on
+      active: False # False: skipped by training and transfer evaluation (checkpoint removed)
+      frames: 2 # stacked frames the encoder sees; the target is the representation at the last one
+      max_steps: 6000
+      alignment_weight: 1.0
+      rollout_weight: 1.0
+      seed: 0
+      grad_clip: 0.0 # max gradient norm; 0 = no clipping
+      lr_schedule: constant # constant | cosine (decay to 0 after warmup)
+      warmup_steps: 0
+      arch: small # small (Atari-style CNN) | resnet
+      pool: flatten # resnet only: global (average) | flatten
+      augment: False # image augmentation of the training batches (encoder.augmentation)
+    raw_state:
+      representation: raw_state
+      dynamics_checkpoint: 'checkpoints/raw_state_dynamics.pt'
+      dynamics_results: 'results/raw_state_dynamics.json'
+      encoder_checkpoint: 'checkpoints/raw_state_encoder.pt'
+      encoder_results: 'results/raw_state_encoder.json'
+      train_dynamics: True
+      dataset_root: 'dataset' # folder of run subfolders the encoder trains and validates on
+      active: False # False: skipped by training and transfer evaluation (checkpoint removed)
+      frames: 2 # stacked frames the encoder sees; the target is the representation at the last one
+      max_steps: 6000
+      alignment_weight: 1.0
+      rollout_weight: 0.0
+      seed: 0
+      grad_clip: 0.0 # max gradient norm; 0 = no clipping
+      lr_schedule: constant # constant | cosine (decay to 0 after warmup)
+      warmup_steps: 0
+      arch: small # small (Atari-style CNN) | resnet
+      pool: flatten # resnet only: global (average) | flatten
+      augment: False # image augmentation of the training batches (encoder.augmentation)
+    constraint_space_f4: # option 2: more context frames
+      representation: augmented
+      dynamics_checkpoint: 'checkpoints/constraint_space_dynamics.pt'
+      encoder_checkpoint: 'checkpoints/constraint_space_f4_encoder.pt'
+      encoder_results: 'results/constraint_space_f4_encoder.json'
+      train_dynamics: False
+      dataset_root: 'dataset' # folder of run subfolders the encoder trains and validates on
+      active: False # False: skipped by training and transfer evaluation (checkpoint removed)
+      frames: 4
+      max_steps: 6000
+      alignment_weight: 1.0
+      rollout_weight: 0.0
+      seed: 0
+      grad_clip: 0.0 # max gradient norm; 0 = no clipping
+      lr_schedule: constant # constant | cosine (decay to 0 after warmup)
+      warmup_steps: 0
+      arch: small # small (Atari-style CNN) | resnet
+      pool: flatten # resnet only: global (average) | flatten
+      augment: False # image augmentation of the training batches (encoder.augmentation)
+    constraint_space_long: # option 2: longer training
+      representation: augmented
+      dynamics_checkpoint: 'checkpoints/constraint_space_dynamics.pt'
+      encoder_checkpoint: 'checkpoints/constraint_space_long_encoder.pt'
+      encoder_results: 'results/constraint_space_long_encoder.json'
+      train_dynamics: False
+      dataset_root: 'dataset' # folder of run subfolders the encoder trains and validates on
+      active: False # False: skipped by training and transfer evaluation (checkpoint removed)
+      frames: 2
+      max_steps: 20000
+      alignment_weight: 1.0
+      rollout_weight: 0.0
+      seed: 0
+      grad_clip: 0.0 # max gradient norm; 0 = no clipping
+      lr_schedule: constant # constant | cosine (decay to 0 after warmup)
+      warmup_steps: 0
+      arch: small # small (Atari-style CNN) | resnet
+      pool: flatten # resnet only: global (average) | flatten
+      augment: False # image augmentation of the training batches (encoder.augmentation)
+    constraint_space_f4_long: # option 2: both
+      representation: augmented
+      dynamics_checkpoint: 'checkpoints/constraint_space_dynamics.pt'
+      encoder_checkpoint: 'checkpoints/constraint_space_f4_long_encoder.pt'
+      encoder_results: 'results/constraint_space_f4_long_encoder.json'
+      train_dynamics: False
+      dataset_root: 'dataset' # folder of run subfolders the encoder trains and validates on
+      active: False # False: skipped by training and transfer evaluation (checkpoint removed)
+      frames: 4
+      max_steps: 20000
+      alignment_weight: 1.0
+      rollout_weight: 0.0
+      seed: 0
+      grad_clip: 0.0 # max gradient norm; 0 = no clipping
+      lr_schedule: constant # constant | cosine (decay to 0 after warmup)
+      warmup_steps: 0
+      arch: small # small (Atari-style CNN) | resnet
+      pool: flatten # resnet only: global (average) | flatten
+      augment: False # image augmentation of the training batches (encoder.augmentation)
+    constraint_space_stable: # option 2A: clipping + warmup + cosine decay (seed 1 of the 3-seed comparison)
+      representation: augmented
+      dynamics_checkpoint: 'checkpoints/constraint_space_dynamics.pt'
+      encoder_checkpoint: 'checkpoints/constraint_space_stable_encoder.pt'
+      encoder_results: 'results/constraint_space_stable_encoder.json'
+      train_dynamics: False
+      dataset_root: 'dataset' # folder of run subfolders the encoder trains and validates on
+      active: False # False: skipped by training and transfer evaluation (checkpoint removed)
+      frames: 2
+      max_steps: 20000
+      alignment_weight: 1.0
+      rollout_weight: 0.0
+      seed: 1
+      grad_clip: 1.0
+      lr_schedule: cosine
+      warmup_steps: 500
+      arch: small # small (Atari-style CNN) | resnet
+      pool: flatten # resnet only: global (average) | flatten
+      augment: False # image augmentation of the training batches (encoder.augmentation)
+    constraint_space_resnet: # option 2B: residual CNN, global pooling (seed 1 of the 3-seed comparison)
+      representation: augmented
+      dynamics_checkpoint: 'checkpoints/constraint_space_dynamics.pt'
+      encoder_checkpoint: 'checkpoints/constraint_space_resnet_encoder.pt'
+      encoder_results: 'results/constraint_space_resnet_encoder.json'
+      train_dynamics: False
+      dataset_root: 'dataset' # folder of run subfolders the encoder trains and validates on
+      active: False # False: skipped by training and transfer evaluation (checkpoint removed)
+      frames: 2
+      max_steps: 20000
+      alignment_weight: 1.0
+      rollout_weight: 0.0
+      seed: 1
+      grad_clip: 1.0
+      lr_schedule: cosine
+      warmup_steps: 500
+      arch: resnet
+      pool: global
+      augment: False # image augmentation of the training batches (encoder.augmentation)
+    constraint_space_resnet_randomized: # same recipe as constraint_space_resnet, trained on randomized-color episodes (Stage 6)
+      representation: augmented
+      dynamics_checkpoint: 'checkpoints/constraint_space_dynamics.pt'
+      encoder_checkpoint: 'checkpoints/constraint_space_resnet_randomized_encoder.pt'
+      encoder_results: 'results/constraint_space_resnet_randomized_encoder.json'
+      train_dynamics: False
+      dataset_root: 'dataset_randomized' # folder of run subfolders the encoder trains and validates on
+      active: True # False: skipped by training and transfer evaluation (checkpoint removed)
+      frames: 2
+      max_steps: 20000
+      alignment_weight: 1.0
+      rollout_weight: 0.0
+      seed: 1
+      grad_clip: 1.0
+      lr_schedule: cosine
+      warmup_steps: 500
+      arch: resnet
+      pool: global
+      augment: False # image augmentation of the training batches (encoder.augmentation)

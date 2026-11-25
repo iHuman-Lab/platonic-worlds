@@ -1,5 +1,8 @@
 import sys
 from contextlib import contextmanager
+from pathlib import Path
+
+import yaml
 
 
 class SkipWith(Exception):
@@ -50,3 +53,16 @@ class ColorPrint:
     @staticmethod
     def print_warn(message, end="\n"):
         sys.stderr.write("\x1b[1;33m" + message.strip() + "\x1b[0m" + end)
+
+
+def load_config(config_dir: str) -> dict:
+    """Merge every YAML file in config_dir into one config; a key in two files is an error."""
+    config = {}
+    for path in sorted(Path(config_dir).glob("*.yaml")):
+        with path.open() as config_file:
+            section = yaml.safe_load(config_file)
+        repeated = set(section) & set(config)
+        if repeated:
+            raise ValueError(f"{path.name} repeats keys from another config file: {sorted(repeated)}")
+        config.update(section)
+    return config

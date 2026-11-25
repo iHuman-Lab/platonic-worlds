@@ -132,3 +132,6 @@ videos/
 
 # Trained model checkpoints
 /checkpoints/
+tb_logs/
+/dataset_*/
+/plans/
