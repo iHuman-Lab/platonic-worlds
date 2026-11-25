@@ -1,3 +1,5 @@
+import fcntl
+import json
 import sys
 from contextlib import contextmanager
 from pathlib import Path
@@ -66,3 +68,24 @@ def load_config(config_dir: str) -> dict:
             raise ValueError(f"{path.name} repeats keys from another config file: {sorted(repeated)}")
         config.update(section)
     return config
+
+
+def save_results(path: str, key: str, results: dict) -> None:
+    """Store results under key ('a/b' nests) in the stage's JSON file; other sections are kept.
+
+    The read-update-write is done under a file lock, so parallel runs can share one file.
+    """
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "a+") as results_file:
+        fcntl.flock(results_file, fcntl.LOCK_EX)
+        results_file.seek(0)
+        text = results_file.read()
+        stored = json.loads(text) if text else {}
+        section, *parents = reversed(key.split("/"))
+        node = stored
+        for name in reversed(parents):
+            node = node.setdefault(name, {})
+        node[section] = results
+        results_file.seek(0)
+        results_file.truncate()
+        results_file.write(json.dumps(stored, indent=1))

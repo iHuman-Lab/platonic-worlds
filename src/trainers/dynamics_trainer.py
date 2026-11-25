@@ -7,7 +7,6 @@ baselines, exact STL robustness error, and spec satisfaction accuracy / AUROC.
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import numpy as np
@@ -20,6 +19,7 @@ from models.constraint_dynamics import ConstraintDynamics
 from stl.constraints import constraint_margins, constraint_names
 from stl.representation import represent, to_margins
 from stl.specs import SpecSet
+from utils import save_results
 
 REPORT_STEPS = (1, 4, 8)
 TABLE_METRICS = ("mse_step1", "mse_step8", "persistence_step8", "shuffled_step8", "stl_mse")
@@ -151,9 +151,7 @@ def run_dynamics_experiment(config: dict) -> dict:
                 errors = window_errors(model, name, val, config, specs)
                 per_seed.append({s: summarize(errors, m, specs, config) for s, m in masks.items()})
             results[f"{name}|train_rollout={rollout}"] = aggregate(per_seed)
-    path = Path(cfg["results_file"])
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(results, indent=2))
+    save_results(cfg["results_file"], "comparison", results)
     return results
 
 
@@ -189,7 +187,7 @@ def train_final_dynamics(config: dict, variant: str) -> dict:
     babble = (val["modes"] == MODE_BABBLE).any(dim=1)
     masks = {"all": torch.ones_like(babble), "babble": babble}
     summary = {s: summarize(errors, m, specs, config) for s, m in masks.items()}
-    Path(variant_cfg["dynamics_results"]).write_text(json.dumps(summary, indent=2))
+    save_results(variant_cfg["dynamics_results"], f"dynamics/{variant}", summary)
     return summary
 
 

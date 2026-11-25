@@ -7,14 +7,15 @@ saved dynamics model's mean/std, so the encoder output lives in the coordinates 
 
 from __future__ import annotations
 
-import json
 import math
 import random
 from pathlib import Path
+from typing import Callable
 
 import numpy as np
 
 import torch
+from torch import nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from torchmetrics.classification import BinaryAUROC
@@ -27,12 +28,13 @@ from stl.constraints import constraint_names
 from env.road_geometry import STATE_NAMES
 from stl.representation import represent, to_margins
 from trainers.dynamics_trainer import load_dynamics
+from utils import save_results
 
 
-def encoder_loaders(config: dict, variant: str) -> dict[str, DataLoader]:
-    """Train/val loaders; windows also span the rollout horizon when the variant uses a rollout loss."""
+def encoder_loaders(config: dict, variant: str, with_horizon: bool = False) -> dict[str, DataLoader]:
+    """Train/val loaders; windows also span the rollout horizon for a rollout loss or when with_horizon."""
     variant_cfg = config["transfer"]["variants"][variant]
-    horizon = config["dynamics"]["horizon"] if variant_cfg["rollout_weight"] > 0 else 0
+    horizon = config["dynamics"]["horizon"] if with_horizon or variant_cfg["rollout_weight"] > 0 else 0
     dataset = {
         **config["dataset"],
         "window_length": variant_cfg["frames"] + horizon,
@@ -97,12 +99,11 @@ def encoder_loss(
 
 
 def train_encoder(
-    config: dict, variant_cfg: dict, dynamics: ConstraintDynamics, name: str, loader: DataLoader, device: str
-) -> tuple[ConstraintEncoder, dict]:
-    """Fit the encoder (the dynamics stay frozen); returns the model and the training logs."""
+    config: dict, variant_cfg: dict, model: nn.Module, dynamics: ConstraintDynamics, name: str,
+    loader: DataLoader, device: str, loss_fn: Callable,
+) -> tuple[nn.Module, dict]:
+    """Fit the model with loss_fn (the dynamics stay frozen); returns the model and the training logs."""
     cfg = config["encoder"]
-    out_dim = dynamics.mean.shape[0]
-    model = build_encoder(config, variant_cfg, out_dim).to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=cfg["lr"], weight_decay=cfg["weight_decay"])
     scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lambda step: lr_scale(step, variant_cfg))
     max_norm = variant_cfg["grad_clip"] if variant_cfg["grad_clip"] > 0 else float("inf")
@@ -110,7 +111,7 @@ def train_encoder(
     running, norms, dims, step = [], [], [], 0
     while step < variant_cfg["max_steps"]:
         for batch in loader:
-            loss, per_dim = encoder_loss(model, dynamics, name, batch, config, variant_cfg, device)
+            loss, per_dim = loss_fn(model, dynamics, name, batch, config, variant_cfg, device)
             optimizer.zero_grad()
             loss.backward()
             norms.append(torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm).item())
@@ -188,12 +189,13 @@ def run_encoder_training(config: dict, variant: str) -> dict:
     dynamics.requires_grad_(False)
     name = meta["representation"]
     loaders = encoder_loaders(config, variant)
-    model, logs = train_encoder(config, variant_cfg, dynamics, name, loaders["train"], device)
+    model = build_encoder(config, variant_cfg, dynamics.mean.shape[0]).to(device)
+    model, logs = train_encoder(config, variant_cfg, model, dynamics, name, loaders["train"], device, encoder_loss)
     metrics = evaluate_encoder(model, dynamics, name, loaders["val"], config, variant_cfg["frames"], device)
     metrics["train_loss_curve"] = logs["loss"]
     metrics["train_logs"] = logs
     checkpoint = Path(variant_cfg["encoder_checkpoint"])
     checkpoint.parent.mkdir(parents=True, exist_ok=True)
     torch.save({"state_dict": model.state_dict(), "representation": name, **cfg, "frames": variant_cfg["frames"]}, checkpoint)
-    Path(variant_cfg["encoder_results"]).write_text(json.dumps(metrics, indent=2))
+    save_results(variant_cfg["encoder_results"], f"encoder/{variant}", metrics)
     return metrics

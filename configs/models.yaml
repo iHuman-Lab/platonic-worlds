@@ -51,7 +51,7 @@ dynamics:
   lr: 1.0e-3
   weight_decay: 1.0e-4
   std_floor: 1.0e-6 # added to the normalization std so constant dimensions stay finite
-  results_file: 'results/dynamics_results.json'
+  results_file: 'results/state_dynamics.json'
   final_train_rollout: 8 # training of the dynamics saved for the transfer variants
   final_seed: 1
 
@@ -67,3 +67,37 @@ encoder:
     contrast: 0.2 # multiplicative around the window mean, uniform in 1 +/- this
     noise_std: 0.02 # gaussian pixel noise (images are in [0, 1])
     max_shift: 2.0 # translation in pixels, uniform in +/- this (both axes)
+
+# Constraint Space JEPA: image and state encoders into one common space ------------------
+# The image encoder recipe (frames, arch, pool, steps, optimizer) comes from `recipe_variant`.
+# Step 1 (no JEPA): future False, jepa_weight / pred_constraint_weight / variance_weight 0.
+joint:
+  experiment: joint_p # section name in the results file: step1 | joint_p | frozen_p | jepa_off | ...
+  recipe_variant: constraint_space_resnet # its dynamics checkpoint, dataset and training recipe are reused
+  seed: 1
+  future: True # windows include the 8 future steps (needed for any prediction loss)
+  predictor: joint # joint: P trained with both modalities; frozen: P trained on state alone, then frozen
+  state_steps: 5000 # frozen variant: steps of the state-only phase
+  free_dims: 5 # extra dims beyond the 11 anchored constraint dims (not aligned)
+  state_hidden: 128 # hidden size of the state encoder MLP
+  state_extras: [d_left, d_right, preview] # camera-observable inputs beside the 11-D vector; the EMA targets then carry more than that vector
+  predictor_hidden: 256 # hidden size of the shared predictor
+  action_dim: 3 # steer, gas, brake
+  ema: 0.99 # EMA decay of the target (state) encoder
+  align_weight: 1.0 # alignment of the anchored dims across modalities
+  pred_constraint_weight: 1.0 # decoded future constraint vector vs the true one
+  jepa_weight: 1.0 # predicted future embedding vs the EMA target embedding
+  variance_weight: 1.0 # hinge keeping each embedding dim's batch std above 1
+  checkpoint: 'checkpoints/common_space_joint_s1.pt'
+  results_file: 'results/common_space.json'
+
+# Step 3: invariance tests on the trained common space (paired validation windows) ------------
+invariance:
+  experiment: state_rich # the trained joint experiment to test (its checkpoints and its results section)
+  seeds: [1, 2, 3]
+  checkpoint: 'checkpoints/common_space_{experiment}_s{seed}.pt'
+  subset: 1000 # windows for the retrieval test (chance = 1 / subset)
+  geometry_subset: 1500 # windows whose pairwise distances are correlated
+  probe_train_fraction: 0.7 # first part of the windows (in order) trains the modality probe, the rest tests it
+  probe_steps: 300
+  probe_lr: 0.05

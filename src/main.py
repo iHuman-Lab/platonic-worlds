@@ -11,6 +11,8 @@ from env.race_env import FinishLineCarRacing
 from trainers.conv_jepa import train_conv_jepa
 from trainers.dynamics_trainer import format_results, run_dynamics_experiment, train_final_dynamics
 from trainers.encoder_trainer import run_encoder_training
+from trainers.invariance_eval import run_invariance_experiment
+from trainers.joint_trainer import run_joint_experiment
 from trainers.transfer_eval import format_adaptation, format_transfer, run_adaptation_experiment, run_transfer_experiment
 from utils import load_config, skip_run
 
@@ -92,6 +94,14 @@ with skip_run("skip", "frozen_dynamics_transfer") as check, check():
 with skip_run("skip", "domain_adaptation") as check, check():
     results = run_adaptation_experiment(config)
     print(format_adaptation(results))
+
+
+with skip_run("skip", "common_space") as check, check():
+    run_joint_experiment(config)
+
+
+with skip_run("skip", "invariance_tests") as check, check():
+    run_invariance_experiment(config)
 
 
 with skip_run("skip", "preview_env_episode") as check, check():

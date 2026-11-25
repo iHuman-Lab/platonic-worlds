@@ -8,8 +8,7 @@ constraint-margin space, so a constraint-space and a raw-state variant are compa
 
 from __future__ import annotations
 
-import json
-from pathlib import Path
+from typing import Callable
 
 import numpy as np
 import torch
@@ -26,6 +25,7 @@ from stl.specs import SpecSet
 from trainers.conv_jepa import ConvJEPA
 from trainers.dynamics_trainer import load_dynamics, summarize, window_errors
 from trainers.encoder_trainer import build_encoder
+from utils import save_results
 
 TABLE_COLUMNS = (
     ("oracle", "mse_step8"),
@@ -97,8 +97,16 @@ def evaluate_variant(config: dict, variant: str, specs: SpecSet, device: str, fi
     model, meta = load_dynamics(paths["dynamics_checkpoint"], device)
     model.requires_grad_(False)
     name = meta["representation"]
-    frames = paths["frames"]
     encoder = load_encoder(paths["encoder_checkpoint"], config, paths, model.mean.shape[0], device)
+    return score_encoder(config, paths, model, name, encoder, specs, files)
+
+
+def score_encoder(
+    config: dict, paths: dict, model: ConstraintDynamics, name: str, encoder: torch.nn.Module,
+    specs: SpecSet, files: list[str] | None = None,
+) -> dict:
+    """Oracle and transfer metrics of any camera-to-vector encoder through the frozen dynamics."""
+    frames = paths["frames"]
     loader = transfer_loader(config, frames, files)
     oracle, transfer, extras, babble = collect_errors(model, encoder, name, loader, config, specs, frames)
     result = {}
@@ -121,11 +129,8 @@ def conv_jepa_margins(model: ConvJEPA, batch: dict, shuffle_actions: bool = Fals
     return torch.cat([model.constraint_head(z).unsqueeze(1), model.constraint_head(rolled)], dim=1).cpu()
 
 
-def conv_jepa_window_errors(model: ConvJEPA, batch: dict, specs: SpecSet) -> tuple[dict, dict]:
-    """Errors in the layout of window_errors, plus the step-0 and persistence-from-estimate extras."""
-    true = model.split_batch(batch)[3]
-    pred = conv_jepa_margins(model, batch)
-    shuffled = conv_jepa_margins(model, batch, shuffle_actions=True)
+def margin_window_errors(pred: torch.Tensor, shuffled: torch.Tensor, true: torch.Tensor, specs: SpecSet) -> tuple[dict, dict]:
+    """Errors in the layout of window_errors for predicted margins [B, 1 + H, C], plus step-0 extras."""
     errors = {
         "squared": ((pred - true)[:, 1:] ** 2),
         "persistence": ((true[:, :1] - true)[:, 1:] ** 2),
@@ -137,15 +142,14 @@ def conv_jepa_window_errors(model: ConvJEPA, batch: dict, specs: SpecSet) -> tup
     return errors, extras
 
 
-def evaluate_conv_jepa(config: dict, specs: SpecSet, device: str, files: list[str] | None = None) -> dict:
-    """Score the saved ConvJEPA on the transfer validation windows with the transfer metrics."""
-    model = ConvJEPA.load_from_checkpoint(config["conv_jepa_checkpoint"], config=config, map_location=device)
-    model.eval()
-    loader = transfer_loader(config, config["conv_jepa_frames"], files)
-    pairs = [conv_jepa_window_errors(model, batch, specs) for batch in loader]
-    errors, extras = stack([p[0] for p in pairs]), stack([p[1] for p in pairs])
-    start = config["conv_jepa_frames"] - 1
-    babble = torch.cat([(b["modes"][:, start:] == MODE_BABBLE).any(dim=1) for b in loader])
+def evaluate_margin_predictor(predict: Callable, loader: DataLoader, start: int, specs: SpecSet, config: dict) -> dict:
+    """Score predict(batch, shuffle_actions) -> margins [B, 1 + H, C] on all and on babble windows."""
+    pairs, babble = [], []
+    for batch in loader:
+        true = constraint_margins(batch["states"], batch["extras"], config)[:, start:]
+        pairs.append(margin_window_errors(predict(batch, False), predict(batch, True), true, specs))
+        babble.append((batch["modes"][:, start:] == MODE_BABBLE).any(dim=1))
+    errors, extras, babble = stack([p[0] for p in pairs]), stack([p[1] for p in pairs]), torch.cat(babble)
     result = {}
     for subset, mask in {"all": torch.ones_like(babble), "babble": babble}.items():
         summary = summarize(errors, mask, specs, config)
@@ -153,6 +157,16 @@ def evaluate_conv_jepa(config: dict, specs: SpecSet, device: str, files: list[st
         summary["est_persistence_step8"] = extras["est_persistence"][mask][:, -1].mean().item()
         result[subset] = {"transfer": summary}
     return result
+
+
+def evaluate_conv_jepa(config: dict, specs: SpecSet, device: str, files: list[str] | None = None) -> dict:
+    """Score the saved ConvJEPA on the transfer validation windows with the transfer metrics."""
+    model = ConvJEPA.load_from_checkpoint(config["conv_jepa_checkpoint"], config=config, map_location=device)
+    model.eval()
+    loader = transfer_loader(config, config["conv_jepa_frames"], files)
+    return evaluate_margin_predictor(
+        lambda batch, shuffle: conv_jepa_margins(model, batch, shuffle), loader, config["conv_jepa_frames"] - 1, specs, config
+    )
 
 
 def evaluate_all(config: dict, files: list[str] | None = None) -> dict:
@@ -166,16 +180,10 @@ def evaluate_all(config: dict, files: list[str] | None = None) -> dict:
     return results
 
 
-def save_results(results: dict, path: str) -> None:
-    """Write a results dict as JSON, creating the folder."""
-    Path(path).parent.mkdir(parents=True, exist_ok=True)
-    Path(path).write_text(json.dumps(results, indent=2))
-
-
 def run_transfer_experiment(config: dict) -> dict:
     """Evaluate every variant on the validation split and save the results."""
     results = evaluate_all(config)
-    save_results(results, config["transfer"]["results_file"])
+    save_results(config["transfer"]["results_file"], "transfer", results)
     return results
 
 
@@ -216,7 +224,7 @@ def run_adaptation_experiment(config: dict) -> dict:
         results[group] = {"episodes": len(files)}
         for variant in cfg["variants"]:
             results[group][variant] = evaluate_variant(config, variant, specs, device, files)
-    save_results(results, cfg["results_file"])
+    save_results(cfg["results_file"], "adaptation", results)
     return results
 
 
